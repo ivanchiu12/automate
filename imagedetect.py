@@ -9,6 +9,9 @@ import re
 import cv2
 import pytesseract
 from matplotlib import pyplot as plt
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Scan and extract info from bank payment advice images")
@@ -35,26 +38,46 @@ def extract_text(image):
     return pytesseract.image_to_string(image, config=custom_config, lang='eng')
 
 def parse_bank_info(text):
-    """Parse key information from extracted text"""
-    info = {}
+    """Parse key information using xAI Grok API"""
+    load_dotenv()
+    api_key = os.getenv('XAI_API_KEY')
+    if not api_key:
+        print("❌ XAI_API_KEY not found in .env")
+        return {}
     
-    # Extract date (e.g., 18 Jun 2021)
-    date_match = re.search(r'Date:\s*(\d{1,2} [A-Za-z]{3} \d{4})', text)
-    info['date'] = date_match.group(1) if date_match else 'Not found'
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.x.ai/v1",
+    )
     
-    # Extract amount (e.g., HKD 13,000.00)
-    amount_match = re.search(r'(HKD|USD)? ?[\d,]+.\d{2}', text)
-    info['amount'] = amount_match.group(0) if amount_match else 'Not found'
+    prompt = f"""Extract the following information from this bank payment advice text as a JSON object:
+    - date: The payment date
+    - amount: The payment amount with currency
+    - payee: The recipient name
+    - payer: The sender name
+    - reference: Any reference number
     
-    # Extract payee (e.g., Osim)
-    payee_match = re.search(r'Pay (?:the order of|to) (.*)', text, re.IGNORECASE)
-    info['payee'] = payee_match.group(1).strip() if payee_match else 'Not found'
+    Text:
+    {text}
     
-    # Extract reference or other fields as needed
-    ref_match = re.search(r'Ref\. No\. (\S+)', text)
-    info['reference'] = ref_match.group(1) if ref_match else 'Not found'
+    Respond only with valid JSON.
+    """
     
-    return info
+    try:
+        response = client.chat.completions.create(
+            model="grok-4-0709",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that extracts structured data from text."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+        )
+        extracted_json = response.choices[0].message.content.strip()
+        import json
+        return json.loads(extracted_json)
+    except Exception as e:
+        print(f"❌ Error calling xAI API: {e}")
+        return {}
 
 def main():
     args = parse_arguments()
@@ -73,11 +96,14 @@ def main():
     print("\n📝 Extracted Text:")
     print(extracted_text)
     
-    # Parse key info
+    # Parse key info using LLM
     parsed_info = parse_bank_info(extracted_text)
-    print("\n🔑 Parsed Information:")
-    for key, value in parsed_info.items():
-        print(f"{key.capitalize()}: {value}")
+    print("\n🔑 Parsed Information (via Grok LLM):")
+    if parsed_info:
+        for key, value in parsed_info.items():
+            print(f"{key.capitalize()}: {value}")
+    else:
+        print("No information extracted")
     
     if args.display:
         # For visualization (optional)
