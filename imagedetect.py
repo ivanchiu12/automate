@@ -56,6 +56,7 @@ def parse_bank_info(text):
     - payee: The recipient name
     - payer: The sender name
     - reference: Any reference number
+    - invoice: The invoice number (e.g., 25-AVS-RES-00109-RN)
     
     Text:
     {text}
@@ -102,6 +103,8 @@ def main():
     if parsed_info:
         for key, value in parsed_info.items():
             print(f"{key.capitalize()}: {value}")
+        if 'invoice' not in parsed_info:
+            print("Invoice: Not found")
     else:
         print("No information extracted")
     

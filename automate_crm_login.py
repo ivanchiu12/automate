@@ -11,12 +11,13 @@ from DrissionPage import ChromiumPage, ChromiumOptions, Chromium
 from DrissionPage.errors import BrowserConnectError
 
 class CRMAutoLogin:
-    def __init__(self, headless: bool = False):
+    def __init__(self, headless: bool = False, invoice_number: str = None):
         self.url = "http://192.168.1.152/crm/eware.dll/go"
         self.username = "ivan.chiu"
         self.password = "12345678"
         self.page = None
         self.headless = headless
+        self.invoice_number = invoice_number
         
     def setup_browser(self):
         """Setup DrissionPage browser"""
@@ -125,10 +126,7 @@ class CRMAutoLogin:
             # Wait a bit after clicking
             time.sleep(3)
             
-            # Always wait 20 seconds after login attempt
-            print("⏳ Waiting 20 seconds after login attempt...")
-            time.sleep(20)
-            print("✅ 20-second wait completed")
+            print("✅ 3-second wait completed")
             
             # Find and click the Find button by ID
             find_button = self.page.ele('@id=Find')
@@ -144,6 +142,29 @@ class CRMAutoLogin:
             print("✅ Clicked Find button")
             
             # Optional short wait after clicking
+            time.sleep(2)
+            
+            # Select 'Opportunities' from the dropdown
+            select_elem = self.page.ele('@id=SELECTMenuOption')
+            if not select_elem:
+                print("❌ Dropdown SELECTMenuOption not found")
+                return False
+            print("✅ Found SELECTMenuOption dropdown")
+            
+            # Find the 'Opportunities' option and select it
+            options = select_elem.eles('tag:option')
+            found = False
+            for option in options:
+                if option.text.strip().lower() == 'opportunities':
+                    option.click()
+                    found = True
+                    print("✅ Selected 'Opportunities' option")
+                    break
+            if not found:
+                print("❌ 'Opportunities' option not found in dropdown")
+                return False
+            
+            # Wait a bit for the page to load after selection
             time.sleep(2)
             
             return True
@@ -202,10 +223,33 @@ class CRMAutoLogin:
             if not self.open_website():
                 return False
             
-            # Perform login
+            # Perform login and navigation
             if not self.login():
                 print("❌ Login process failed")
                 return False
+            
+            # If invoice number provided, input it
+            if self.invoice_number:
+                invoice_field = self.page.ele('@id=oppo_afwinvno')
+                if not invoice_field:
+                    print("❌ Invoice input field not found")
+                else:
+                    invoice_field.clear()
+                    invoice_field.input(self.invoice_number)
+                    print(f"✅ Entered invoice number: {self.invoice_number}")
+                    time.sleep(1)
+                    # Click the Search/Find button
+                    search_button = self.page.ele("css:a.ButtonItem[href*='EntryForm.submit']")
+                    if not search_button:
+                        # Fallback: look for anchor containing image Search.gif or text 'Find'
+                        search_button = self.page.ele("css:a.ButtonItem img[src*='Search.gif']") or \
+                                         self.page.ele("txt:Find")
+                    if search_button:
+                        search_button.click()
+                        print("✅ Clicked Search/Find button")
+                    else:
+                        print("⚠️ Search/Find button not found - you may need to adjust selector")
+                time.sleep(2)  # Short wait after input and search
             
             # Keep browser open for user interaction
             self.keep_browser_open()
@@ -221,12 +265,41 @@ class CRMAutoLogin:
 def main():
     """Main function"""
     import argparse
+    import subprocess
+    import sys
+    import json
     
     parser = argparse.ArgumentParser(description="CRM Auto Login using DrissionPage")
     parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
+    parser.add_argument("--invoice", help="Invoice number to input after navigation (overrides auto-detect)")
+    parser.add_argument("--image", default="bank.png", help="Path to bank payment advice image (default: bank.png)")
     args = parser.parse_args()
     
-    auto_login = CRMAutoLogin(headless=args.headless)
+    invoice_number = args.invoice
+    
+    # If no invoice provided, run imagedetect.py to extract it
+    if not invoice_number:
+        print("🔎 Running imagedetect.py to extract invoice number from image...")
+        try:
+            result = subprocess.run([
+                sys.executable, "imagedetect.py", args.image
+            ], capture_output=True, text=True, check=True)
+            output = result.stdout
+            # Try to find the line with 'Invoice:'
+            invoice_number = None
+            for line in output.splitlines():
+                if line.lower().startswith("invoice:"):
+                    invoice_number = line.split(":", 1)[-1].strip()
+                    break
+            if invoice_number:
+                print(f"✅ Detected invoice number: {invoice_number}")
+            else:
+                print("⚠️ Could not detect invoice number from image. Proceeding without auto-input.")
+        except Exception as e:
+            print(f"❌ Error running imagedetect.py: {e}")
+            invoice_number = None
+    
+    auto_login = CRMAutoLogin(headless=args.headless, invoice_number=invoice_number)
     success = auto_login.run()
     
     if not success:
