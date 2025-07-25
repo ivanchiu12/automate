@@ -80,6 +80,18 @@ def parse_bank_info(text):
         print(f"❌ Error calling xAI API: {e}")
         return {}
 
+def extract_invoice(image_path: str) -> tuple[str | None, dict]:
+    """Extract invoice number and parsed info from image. Returns (invoice_number, parsed_info)"""
+    image = cv2.imread(image_path)
+    if image is None:
+        print(f"❌ Failed to load image: {image_path}")
+        return None, {}
+    preprocessed = preprocess_image(image)
+    extracted_text = extract_text(preprocessed)
+    parsed_info = parse_bank_info(extracted_text)
+    invoice = parsed_info.get('invoice') if parsed_info else None
+    return invoice, parsed_info
+
 def main():
     args = parse_arguments()
     

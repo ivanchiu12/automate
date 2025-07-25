@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+
+{% block title %}Upload Invoice{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-lg border-0">
+            <div class="card-header bg-primary text-white text-center">
+                <h2><i class="bi bi-cloud-arrow-up-fill"></i> Upload Bank Payment Advice</h2>
+            </div>
+            <div class="card-body p-5">
+                <p class="text-muted text-center mb-4">
+                    Drag and drop your image file below or click to select a file.
+                </p>
+                <form method="post" enctype="multipart/form-data" id="upload-form">
+                    <div class="mb-3">
+                        <input class="form-control form-control-lg" type="file" name="file" id="file-input" accept="image/*" required>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                            Upload &amp; Automate
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('upload-form').addEventListener('submit', function() {
+    const button = this.querySelector('button[type="submit"]');
+    const spinner = button.querySelector('.spinner-border');
+    button.disabled = true;
+    spinner.classList.remove('d-none');
+});
+</script>
+{% endblock %} 
