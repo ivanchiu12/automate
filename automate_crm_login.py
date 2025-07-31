@@ -18,13 +18,16 @@ from bs4 import BeautifulSoup
 import json
 
 class CRMAutoLogin:
-    def __init__(self, headless: bool = False, invoice_number: str = None, return_json: bool = False):
+    def __init__(self, headless: bool = False, invoice_number: str = None, invoice_numbers: list = None, return_json: bool = False, no_interactive: bool = False, web_output: bool = False):
         self.url = "http://192.168.1.152/crm/eware.dll/go"
         self.username = "ivan.chiu"
         self.password = "12345678"
         self.headless = headless
         self.invoice_number = invoice_number
+        self.invoice_numbers = invoice_numbers or ([invoice_number] if invoice_number else [])
         self.return_json = return_json
+        self.no_interactive = no_interactive
+        self.web_output = web_output
         
     def setup_browser(self):
         """Setup Selenium Chrome browser"""
@@ -118,23 +121,28 @@ class CRMAutoLogin:
                 print(f"❌ Find button not found or not clickable: {e}", file=sys.stderr)
                 return False
 
-            # --- Switch to main content frame (EWARE_MID) to access dropdown ---
+            # --- Switch to top frame (EWARE_TOP) to access dropdown ---
             self.driver.switch_to.default_content()
             try:
-                self.driver.switch_to.frame("EWARE_MID")
+                self.driver.switch_to.frame("EWARE_TOP")
             except Exception:
+                print("⚠️ Could not switch to frame 'EWARE_TOP' – trying alternative method", file=sys.stderr)
                 WebDriverWait(self.driver, 10).until(
-                    EC.frame_to_be_available_and_switch_to_it((By.NAME, "EWARE_MID"))
+                    EC.frame_to_be_available_and_switch_to_it((By.NAME, "EWARE_TOP"))
                 )
 
             select_elem = WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.ID, "SELECTMenuOption"))
             )
-            if not select_elem:
-                print("❌ Dropdown SELECTMenuOption not found", file=sys.stderr)
-                return False
             print("✅ Found SELECTMenuOption dropdown", file=sys.stderr)
+            
+            # Get all options and print them for debugging
             options = select_elem.find_elements(By.TAG_NAME, "option")
+            print(f"Found {len(options)} options in dropdown:", file=sys.stderr)
+            for i, option in enumerate(options):
+                print(f"  {i}: '{option.text}'", file=sys.stderr)
+            
+            # Select Opportunities option
             found = False
             for option in options:
                 if option.text.strip().lower() == 'opportunities':
@@ -145,7 +153,17 @@ class CRMAutoLogin:
             if not found:
                 print("❌ 'Opportunities' option not found in dropdown", file=sys.stderr)
                 return False
-            time.sleep(2)
+            time.sleep(3)  # Wait for page to load after selecting Opportunities
+            
+            # Switch back to main content frame for invoice input
+            self.driver.switch_to.default_content()
+            try:
+                self.driver.switch_to.frame("EWARE_MID")
+            except Exception:
+                print("⚠️ Could not switch to frame 'EWARE_MID' – trying alternative method", file=sys.stderr)
+                WebDriverWait(self.driver, 10).until(
+                    EC.frame_to_be_available_and_switch_to_it((By.NAME, "EWARE_MID"))
+                )
             return True
         except Exception as e:
             print(f"❌ Login failed: {e}", file=sys.stderr)
@@ -172,79 +190,165 @@ class CRMAutoLogin:
                 pass
             print("✅ Browser closed", file=sys.stderr)
     
+    def search_invoice(self, invoice_number):
+        """Search for a single invoice and return results"""
+        print(f"🔍 Searching for invoice: {invoice_number}", file=sys.stderr)
+        
+        # Make sure we're in the correct frame for invoice input
+        self.driver.switch_to.default_content()
+        try:
+            self.driver.switch_to.frame("EWARE_MID")
+        except Exception:
+            WebDriverWait(self.driver, 10).until(
+                EC.frame_to_be_available_and_switch_to_it((By.NAME, "EWARE_MID"))
+            )
+        
+        invoice_field = WebDriverWait(self.driver, 10).until(
+            EC.presence_of_element_located((By.ID, "oppo_afwinvno"))
+        )
+        if not invoice_field:
+            print("❌ Invoice input field not found", file=sys.stderr)
+            return []
+        
+        invoice_field.clear()
+        invoice_field.send_keys(invoice_number)
+        print(f"✅ Entered invoice number: {invoice_number}", file=sys.stderr)
+        time.sleep(1)
+        
+        # Try different search button selectors
+        search_button = None
+        try:
+            search_button = self.driver.find_element(By.CSS_SELECTOR, "a.ButtonItem[href*='EntryForm.submit']")
+        except:
+            try:
+                search_button = self.driver.find_element(By.CSS_SELECTOR, "a.ButtonItem img[src*='Search.gif']")
+            except:
+                try:
+                    search_button = self.driver.find_element(By.NAME, "Find")
+                except:
+                    search_button = None
+        
+        if search_button:
+            search_button.click()
+            print("✅ Clicked Search/Find button", file=sys.stderr)
+            time.sleep(5)
+        else:
+            print("⚠️ Search/Find button not found - you may need to adjust selector", file=sys.stderr)
+            return []
+        
+        # Parse results
+        html = self.driver.page_source
+        records = self._parse_results(html)
+        print(f"✅ Found {len(records)} records for invoice {invoice_number}", file=sys.stderr)
+        
+        # Add source invoice to each record
+        for record in records:
+            record['_source_invoice'] = invoice_number
+            
+        return records
+
     def run(self):
         """Main execution method"""
         print("🚀 Starting CRM Auto Login...", file=sys.stderr)
         print("=" * 50, file=sys.stderr)
         if not self.setup_browser():
-            return False
+            return False, []
         try:
             if not self.open_website():
-                return False
+                return False, []
             if not self.login():
                 print("❌ Login process failed", file=sys.stderr)
-                return False
-            if self.invoice_number:
-                invoice_field = self.driver.find_element(By.ID, "oppo_afwinvno")
-                if not invoice_field:
-                    print("❌ Invoice input field not found", file=sys.stderr)
-                else:
-                    invoice_field.clear()
-                    invoice_field.send_keys(self.invoice_number)
-                    print(f"✅ Entered invoice number: {self.invoice_number}", file=sys.stderr)
-                    time.sleep(1)
-                    search_button = self.driver.find_element(By.CSS_SELECTOR, "a.ButtonItem[href*='EntryForm.submit']")
-                    if not search_button:
-                        search_button = self.driver.find_element(By.CSS_SELECTOR, "a.ButtonItem img[src*='Search.gif']") or self.driver.find_element(By.NAME, "txt:Find")
-                    if search_button:
-                        search_button.click()
-                        print("✅ Clicked Search/Find button", file=sys.stderr)
-                        time.sleep(5)
-                    else:
-                        print("⚠️ Search/Find button not found - you may need to adjust selector", file=sys.stderr)
-                time.sleep(2)
-            # Always parse and print results after search
-            time.sleep(2)
-            # After clicking the search/find button and waiting:
-            self.driver.switch_to.frame('EWARE_MID')  # Use the correct frame name
-            find_button = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.ID, "Find"))
-            )
-            html = self.driver.page_source
-            records = self._parse_results(html)
-            self.driver.switch_to.default_content() # Switch back if you need to interact with the main page
-            if self.return_json:
-                print(json.dumps(records, ensure_ascii=False))
+                return False, []
+            
+            all_records = []
+            
+            if self.invoice_numbers:
+                for i, invoice in enumerate(self.invoice_numbers):
+                    print(f"📄 Processing invoice {i+1}/{len(self.invoice_numbers)}: {invoice}", file=sys.stderr)
+                    records = self.search_invoice(invoice)
+                    # Add record index for identification
+                    for record in records:
+                        record['_record_index'] = i + 1
+                    all_records.extend(records)
+                    
+                    # Small delay between searches
+                    if i < len(self.invoice_numbers) - 1:
+                        time.sleep(2)
+            elif self.invoice_number:
+                # Backward compatibility for single invoice
+                records = self.search_invoice(self.invoice_number)
+                for record in records:
+                    record['_record_index'] = 1
+                all_records = records
+            
+            # Print results
+            if self.return_json or self.web_output:
+                print(json.dumps(all_records, ensure_ascii=False))
             else:
                 # Print as readable table
-                if records:
-                    headers = list(records[0].keys())
+                if all_records:
+                    headers = [h for h in all_records[0].keys() if not h.startswith('_')]
                     row_format = " | ".join(["{:>15}"] * len(headers))
                     print("\n" + row_format.format(*headers))
                     print("-" * (18 * len(headers)))
-                    for rec in records:
-                        print(row_format.format(*[str(rec[h]) for h in headers]))
+                    for rec in all_records:
+                        print(row_format.format(*[str(rec[h]) for h in headers if not h.startswith('_')]))
                 else:
                     print("No records found.")
-            if not self.return_json:
+            
+            if not self.return_json and not self.no_interactive and not self.web_output:
                 self.keep_browser_open()
+            
+            return True, all_records
         except Exception as e:
             print(f"❌ Unexpected error: {e}", file=sys.stderr)
-            return False
+            return False, []
         finally:
             self.close()
-        return True
 
     def _parse_results(self, html: str):
         """Parse CRM table rows into list of dicts, matching the actual table columns dynamically and robustly."""
         soup = BeautifulSoup(html, 'html.parser')
-        table = soup.find('table', class_='CONTENT')
-        # Parse table
+        
+        # Try multiple approaches to find the correct table
+        table = None
+        
+        # First try: Look for table with CONTENT class
+        tables = soup.find_all('table', class_='CONTENT')
+        print(f"Found {len(tables)} tables with class 'CONTENT'", file=sys.stderr)
+        
+        if len(tables) > 0:
+            # If multiple tables, try to find the one with data rows
+            for i, t in enumerate(tables):
+                rows = t.find_all('tr')
+                data_rows = [r for r in rows if r.find('td', class_='ROW1') or r.find('td', class_='ROW2')]
+                print(f"Table {i}: {len(rows)} total rows, {len(data_rows)} data rows", file=sys.stderr)
+                if len(data_rows) > 0:
+                    table = t
+                    print(f"Selected table {i} with {len(data_rows)} data rows", file=sys.stderr)
+                    break
+        
+        # If no table found, try looking for any table with ROW1/ROW2 classes
         if not table:
+            all_tables = soup.find_all('table')
+            print(f"Searching through {len(all_tables)} total tables", file=sys.stderr)
+            for i, t in enumerate(all_tables):
+                rows = t.find_all('tr')
+                data_rows = [r for r in rows if r.find('td', class_='ROW1') or r.find('td', class_='ROW2')]
+                if len(data_rows) > 0:
+                    table = t
+                    print(f"Found table {i} with {len(data_rows)} data rows", file=sys.stderr)
+                    break
+        
+        if not table:
+            print("❌ No table with data rows found", file=sys.stderr)
             return []
+            
         rows = table.find_all('tr')
         if not rows or len(rows) < 2:
+            print("❌ Table has insufficient rows", file=sys.stderr)
             return []
+            
         # Find the first row with GRIDHEAD class for headers
         header_row = None
         for row in rows:
@@ -253,6 +357,7 @@ class CRMAutoLogin:
                 break
         if not header_row:
             header_row = rows[0]
+            
         header_cells = header_row.find_all(['td', 'th'])
         headers = []
         for cell in header_cells:
@@ -263,9 +368,13 @@ class CRMAutoLogin:
                 text = cell.get_text(separator=' ', strip=True)
             text = text.replace('\xa0', '').strip()
             headers.append(text)
+            
         # Remove leading empty headers
         while headers and headers[0] == '':
             headers.pop(0)
+            
+        print(f"Found headers: {headers}", file=sys.stderr)
+        
         results = []
         for row in rows:
             # Only process data rows (ROW1/ROW2)
@@ -276,7 +385,7 @@ class CRMAutoLogin:
                 continue
             # Use only the last N headers for mapping
             n = len(cells)
-            used_headers = headers[-n:]
+            used_headers = headers[-n:] if len(headers) >= n else [f'col{i}' for i in range(n)]
             record = {}
             for i, cell in enumerate(cells):
                 a = cell.find('a')
@@ -287,6 +396,8 @@ class CRMAutoLogin:
                 text = text.replace('\xa0', '').strip()
                 record[used_headers[i] if i < len(used_headers) else f'col{i}'] = text
             results.append(record)
+            
+        print(f"Parsed {len(results)} records", file=sys.stderr)
         return results
 
 def main():
@@ -294,35 +405,43 @@ def main():
     import subprocess
     parser = argparse.ArgumentParser(description="CRM Auto Login using Selenium")
     parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
-    parser.add_argument("--invoice", help="Invoice number to input after navigation (overrides auto-detect)")
-    parser.add_argument("--image", default="bank.png", help="Path to bank payment advice image (default: bank.png)")
+    parser.add_argument("--invoice", help="Single invoice number to input after navigation")
+    parser.add_argument("--invoices", nargs='+', help="Multiple invoice numbers to search")
+    parser.add_argument("--image", default="bank.png", help="Path to bank payment advice image or PDF (default: bank.png)")
     parser.add_argument("--json", action="store_true", help="Return search table as JSON and exit (no interactive browser)")
+    parser.add_argument("--no-interactive", action="store_true", help="Do not keep browser open after parsing results")
+    parser.add_argument("--web-output", action="store_true", help="Output JSON for web integration (implies --json)")
     args = parser.parse_args()
-    invoice_number = args.invoice
-    if not invoice_number and not args.json:
-        print("🔎 Running imagedetect.py to extract invoice number from image...", file=sys.stderr)
+    
+    invoice_numbers = args.invoices or []
+    if args.invoice:
+        invoice_numbers = [args.invoice]
+    
+    if not invoice_numbers and not args.json:
+        print("🔎 Running imagedetect.py to extract invoice numbers from file...", file=sys.stderr)
         try:
-            result = subprocess.run(
-                [sys.executable, "imagedetect.py", args.image],
-                capture_output=True, text=True, check=True
-            )
-            output = result.stdout
-            invoice_number = None
-            for line in output.splitlines():
-                if line.lower().startswith("invoice:"):
-                    invoice_number = line.split(":", 1)[-1].strip()
-                    break
-            if invoice_number:
-                print(f"✅ Detected invoice number: {invoice_number}", file=sys.stderr)
+            # Import here to avoid circular imports
+            from imagedetect import extract_invoice
+            detected_invoices, _ = extract_invoice(args.image)
+            if detected_invoices:
+                invoice_numbers = detected_invoices
+                print(f"✅ Detected {len(invoice_numbers)} invoice number(s): {', '.join(invoice_numbers)}", file=sys.stderr)
             else:
-                print("⚠️ Could not detect invoice number from image.", file=sys.stderr)
+                print("⚠️ Could not detect any invoice numbers from file.", file=sys.stderr)
         except Exception as e:
             print(f"❌ Error running imagedetect.py: {e}", file=sys.stderr)
-            invoice_number = None
+    
+    if args.web_output:
+        args.json = True  # web_output implies JSON output
+    
     auto_login = CRMAutoLogin(
-        headless=args.headless, invoice_number=invoice_number, return_json=args.json
+        headless=args.headless, 
+        invoice_numbers=invoice_numbers,
+        return_json=args.json, 
+        no_interactive=args.no_interactive, 
+        web_output=args.web_output
     )
-    success = auto_login.run()
+    success, records = auto_login.run()
     if not success:
         print("\n❌ Script execution failed", file=sys.stderr)
         sys.exit(1)

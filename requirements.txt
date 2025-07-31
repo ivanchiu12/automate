@@ -3,3 +3,8 @@ opencv-python
 pytesseract
 matplotlib 
 openai
+PyMuPDF
+pdf2image
+Pillow
+python-dotenv
+flask

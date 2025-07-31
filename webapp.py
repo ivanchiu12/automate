@@ -10,6 +10,7 @@ import os
 import uuid
 import subprocess
 import sys
+import json
 from imagedetect import extract_invoice
 
 UPLOAD_FOLDER = 'uploads'
@@ -39,29 +40,56 @@ def index():
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
             
-            # Extract invoice
-            invoice, parsed_info = extract_invoice(file_path)
-            if not invoice:
-                flash('Invoice number not detected.', 'danger')
-                return render_template('result.html', info=parsed_info, invoice=None, crm_rows=[])
+            # Extract invoices (can be multiple from PDF)
+            invoice_numbers, parsed_info_list = extract_invoice(file_path)
+            if not invoice_numbers:
+                flash('No invoice numbers detected.', 'danger')
+                return render_template('result.html', records=parsed_info_list, all_crm_rows=[], logs="")
             else:
-                flash(f'Invoice detected: {invoice}. Launching CRM automation...', 'success')
+                flash(f'Found {len(invoice_numbers)} invoice(s): {", ".join(invoice_numbers)}. Launching CRM automation...', 'success')
+                
                 try:
-                    proc = subprocess.run([
-                        sys.executable, 'automate_crm_login.py', '--invoice', invoice, '--headless', '--json'
-                    ], capture_output=True, text=True, check=True, timeout=300)
-                    crm_rows = []
+                    # Run CRM script once for all invoices (more efficient)
+                    cmd = [sys.executable, 'automate_crm_login.py', '--headless', '--no-interactive', '--web-output']
+                    cmd.extend(['--invoices'] + invoice_numbers)
+                    
+                    proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=600)  # Longer timeout for multiple invoices
+                    
+                    # Combine stdout and stderr for logs
+                    combined_logs = f"STDOUT:\n{proc.stdout}\n\nSTDERR:\n{proc.stderr}"
+                    
+                    # Try to parse JSON from stdout if available
+                    all_crm_rows = []
                     if proc.stdout:
-                        import json
-                        crm_rows = json.loads(proc.stdout)
-                    flash('CRM automation completed successfully!', 'success')
+                        try:
+                            # Look for JSON in stdout
+                            lines = proc.stdout.strip().split('\n')
+                            for line in lines:
+                                if line.strip().startswith('[') and line.strip().endswith(']'):
+                                    all_crm_rows = json.loads(line)
+                                    break
+                        except:
+                            pass
+                    
+                    if proc.returncode == 0:
+                        if all_crm_rows:
+                            flash(f'CRM automation completed! Found {len(all_crm_rows)} total records.', 'success')
+                        else:
+                            flash('CRM automation completed but no records found.', 'warning')
+                    else:
+                        flash(f'CRM script exited with code {proc.returncode}. Check logs for details.', 'warning')
+                        
                 except subprocess.CalledProcessError as e:
                     flash(f'CRM script error: {e.stderr}', 'danger')
-                    crm_rows = []
-                except subprocess.TimeoutExpired:
-                    flash('CRM script timed out after 5 minutes.', 'danger')
-                    crm_rows = []
-                return render_template('result.html', info=parsed_info, invoice=invoice, crm_rows=crm_rows)
+                    all_crm_rows = []
+                    combined_logs = f"ERROR: {str(e)}\nSTDERR: {e.stderr}"
+                except subprocess.TimeoutExpired as e:
+                    flash('CRM script timed out after 10 minutes.', 'danger')
+                    all_crm_rows = []
+                    combined_logs = f"TIMEOUT: {str(e)}\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
+                
+                flash(f'Processing completed! Total CRM records found: {len(all_crm_rows)}', 'info')
+                return render_template('result.html', records=parsed_info_list, all_crm_rows=all_crm_rows, logs=combined_logs)
         else:
             flash('File type not allowed. Please upload an image.', 'danger')
             return redirect(request.url)
