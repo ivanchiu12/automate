@@ -21,7 +21,7 @@ class CRMAutoLogin:
     def __init__(self, headless: bool = False, invoice_number: str = None, invoice_numbers: list = None, return_json: bool = False, no_interactive: bool = False, web_output: bool = False):
         self.url = "http://192.168.1.152/crm/eware.dll/go"
         self.username = "ivan.chiu"
-        self.password = "12345678"
+        self.password = "25207090"
         self.headless = headless
         self.invoice_number = invoice_number
         self.invoice_numbers = invoice_numbers or ([invoice_number] if invoice_number else [])
@@ -32,10 +32,10 @@ class CRMAutoLogin:
     def setup_browser(self):
         """Setup Selenium Chrome browser"""
         chrome_options = Options()
-        if self.headless:
-            chrome_options.add_argument('--headless')
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--window-size=1920,1080')
+        # if self.headless:
+        #     chrome_options.add_argument('--headless')
+        #     chrome_options.add_argument('--disable-gpu')
+        #     chrome_options.add_argument('--window-size=1920,1080')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
         try:
@@ -58,50 +58,170 @@ class CRMAutoLogin:
             print(f"❌ Failed to open website: {e}", file=sys.stderr)
             return False
     
-    def login(self):
+    def login(self, max_retries=3):
         """Perform login with credentials"""
+        retry_count = 0
+
+        while retry_count < max_retries:
+            try:
+                print("🔐 Starting login process...", file=sys.stderr)
+                time.sleep(2)
+                
+                # First check if we're already logged in by looking for Logonbutton elements
+                logon_buttons = self.driver.find_elements(By.CLASS_NAME, "Logonbutton")
+                print(f"🔍 Found {len(logon_buttons)} Logonbutton elements on page load", file=sys.stderr)
+                
+                if len(logon_buttons) == 0:
+                    print("✅ No login buttons found - already logged in!", file=sys.stderr)
+                    return self._handle_already_logged_in()
+                
+                username_field = self.driver.find_element(By.NAME, "EWARE_USERID")
+                if not username_field:
+                    print("❌ Username field not found", file=sys.stderr)
+                    return False
+                print("✅ Found username field", file=sys.stderr)
+                username_field.clear()
+                username_field.send_keys(self.username)
+                print(f"✅ Entered username: {self.username}", file=sys.stderr)
+                password_field = self.driver.find_element(By.NAME, "PASSWORD")
+                if not password_field:
+                    print("❌ Password field not found", file=sys.stderr)
+                    return False
+                print("✅ Found password field", file=sys.stderr)
+                password_field.clear()
+                password_field.send_keys(self.password)
+                print("✅ Entered password", file=sys.stderr)
+                login_button = self.driver.find_element(By.CLASS_NAME, "Logonbutton")
+                if not login_button:
+                    print("❌ Login button not found", file=sys.stderr)
+                    return False
+                print("✅ Found login button", file=sys.stderr)
+                login_button.click()
+                print("✅ Clicked login button", file=sys.stderr)
+
+                # Wait and check for Logonbutton elements with retry logic
+                logon_buttons_found = False
+                for attempt in range(5):  # Try up to 5 times with increasing wait
+                    time.sleep(3 + attempt)  # Start with 3s, then 4s, 5s, 6s, 7s
+                    logon_buttons = self.driver.find_elements(By.CLASS_NAME, "Logonbutton")
+                    print(f"🔄 Attempt {attempt + 1}: Found {len(logon_buttons)} Logonbutton elements", file=sys.stderr)
+
+                    if len(logon_buttons) >= 3:
+                        logon_buttons_found = True
+                        print(f"✅ Successfully found {len(logon_buttons)} Logonbutton elements", file=sys.stderr)
+                        break
+                    elif attempt < 4:  # Don't print this on the last attempt
+                        print(f"⏳ Waiting longer for page to load... ({3 + attempt + 1}s)", file=sys.stderr)
+
+                if not logon_buttons_found:
+                    if retry_count < max_retries - 1:
+                        print(f"❌ Found only {len(logon_buttons)} Logonbutton(s), need at least 3. Retrying... ({retry_count + 1}/{max_retries})", file=sys.stderr)
+                        retry_count += 1
+                        # Refresh the page and try again
+                        self.driver.refresh()
+                        time.sleep(2)
+                        continue
+                    else:
+                        print(f"❌ Found only {len(logon_buttons)} Logonbutton(s), need at least 3 for the third one. All {max_retries} retries failed.", file=sys.stderr)
+                        return False
+
+                third_button = logon_buttons[2]
+                inner_link = third_button.find_element(By.TAG_NAME, "a")
+                if inner_link:
+                    inner_link.click()
+                else:
+                    third_button.click()
+                print("✅ Clicked the third Logonbutton", file=sys.stderr)
+                time.sleep(3)
+                print("✅ 3-second wait completed", file=sys.stderr)
+
+                # If we get here, login was successful
+                # --- Switch to left navigation frame (EWARE_MENU) and click the Find button ---
+                self.driver.switch_to.default_content()
+                try:
+                    self.driver.switch_to.frame("EWARE_MENU")
+                except Exception:
+                    print("⚠️ Could not switch to frame 'EWARE_MENU' – trying alternative method", file=sys.stderr)
+                    menu_frame = WebDriverWait(self.driver, 10).until(
+                        EC.frame_to_be_available_and_switch_to_it((By.NAME, "EWARE_MENU"))
+                    )
+                try:
+                    find_button = WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable((By.ID, "Find"))
+                    )
+                    print("✅ Found Find button", file=sys.stderr)
+                    find_button.click()
+                    print("✅ Clicked Find button", file=sys.stderr)
+                except Exception as e:
+                    print(f"❌ Find button not found or not clickable: {e}", file=sys.stderr)
+                    return False
+
+                # --- Switch to top frame (EWARE_TOP) to access dropdown ---
+                self.driver.switch_to.default_content()
+                try:
+                    self.driver.switch_to.frame("EWARE_TOP")
+                except Exception:
+                    print("⚠️ Could not switch to frame 'EWARE_TOP' – trying alternative method", file=sys.stderr)
+                    WebDriverWait(self.driver, 10).until(
+                        EC.frame_to_be_available_and_switch_to_it((By.NAME, "EWARE_TOP"))
+                    )
+
+                select_elem = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "SELECTMenuOption"))
+                )
+                print("✅ Found SELECTMenuOption dropdown", file=sys.stderr)
+
+                # Get all options and print them for debugging
+                options = select_elem.find_elements(By.TAG_NAME, "option")
+                print(f"Found {len(options)} options in dropdown:", file=sys.stderr)
+                for i, option in enumerate(options):
+                    print(f"  {i}: '{option.text}'", file=sys.stderr)
+
+                # Select Opportunities option
+                found = False
+                for option in options:
+                    if option.text.strip().lower() == 'opportunities':
+                        option.click()
+                        found = True
+                        print("✅ Selected 'Opportunities' option", file=sys.stderr)
+                        break
+                if not found:
+                    print("❌ 'Opportunities' option not found in dropdown", file=sys.stderr)
+                    return False
+                time.sleep(3)  # Wait for page to load after selecting Opportunities
+
+                # Switch back to main content frame for invoice input
+                self.driver.switch_to.default_content()
+                try:
+                    self.driver.switch_to.frame("EWARE_MID")
+                except Exception:
+                    print("⚠️ Could not switch to frame 'EWARE_MID' – trying alternative method", file=sys.stderr)
+                    WebDriverWait(self.driver, 10).until(
+                        EC.frame_to_be_available_and_switch_to_it((By.NAME, "EWARE_MID"))
+                    )
+                return True
+
+            except Exception as e:
+                if retry_count < max_retries - 1:
+                    print(f"❌ Login attempt {retry_count + 1} failed: {e}", file=sys.stderr)
+                    print(f"🔄 Retrying login... ({retry_count + 2}/{max_retries})", file=sys.stderr)
+                    retry_count += 1
+                    # Refresh the page and try again
+                    self.driver.refresh()
+                    time.sleep(2)
+                    continue
+                else:
+                    print(f"❌ Login failed after {max_retries} attempts: {e}", file=sys.stderr)
+                    return False
+
+        return False
+    
+    def _handle_already_logged_in(self):
+        """Handle the case when user is already logged in"""
         try:
-            print("🔐 Starting login process...", file=sys.stderr)
-            time.sleep(2)
-            username_field = self.driver.find_element(By.NAME, "EWARE_USERID")
-            if not username_field:
-                print("❌ Username field not found", file=sys.stderr)
-                return False
-            print("✅ Found username field", file=sys.stderr)
-            username_field.clear()
-            username_field.send_keys(self.username)
-            print(f"✅ Entered username: {self.username}", file=sys.stderr)
-            password_field = self.driver.find_element(By.NAME, "PASSWORD")
-            if not password_field:
-                print("❌ Password field not found", file=sys.stderr)
-                return False
-            print("✅ Found password field", file=sys.stderr)
-            password_field.clear()
-            password_field.send_keys(self.password)
-            print("✅ Entered password", file=sys.stderr)
-            login_button = self.driver.find_element(By.CLASS_NAME, "Logonbutton")
-            if not login_button:
-                print("❌ Login button not found", file=sys.stderr)
-                return False
-            print("✅ Found login button", file=sys.stderr)
-            login_button.click()
-            print("✅ Clicked login button", file=sys.stderr)
-            time.sleep(3)
-            logon_buttons = self.driver.find_elements(By.CLASS_NAME, "Logonbutton")
-            if len(logon_buttons) < 3:
-                print(f"❌ Found only {len(logon_buttons)} Logonbutton(s), need at least 3 for the third one", file=sys.stderr)
-                return False
-            print(f"✅ Found {len(logon_buttons)} Logonbutton elements", file=sys.stderr)
-            third_button = logon_buttons[2]
-            inner_link = third_button.find_element(By.TAG_NAME, "a")
-            if inner_link:
-                inner_link.click()
-            else:
-                third_button.click()
-            print("✅ Clicked the third Logonbutton", file=sys.stderr)
-            time.sleep(3)
-            print("✅ 3-second wait completed", file=sys.stderr)
-            # --- Switch to left navigation frame (EWARE_MENU) and click the Find button ---
+            print("🔄 Setting up CRM navigation since already logged in...", file=sys.stderr)
+            
+            # Switch to left navigation frame (EWARE_MENU) and click the Find button
             self.driver.switch_to.default_content()
             try:
                 self.driver.switch_to.frame("EWARE_MENU")
@@ -121,7 +241,7 @@ class CRMAutoLogin:
                 print(f"❌ Find button not found or not clickable: {e}", file=sys.stderr)
                 return False
 
-            # --- Switch to top frame (EWARE_TOP) to access dropdown ---
+            # Switch to top frame (EWARE_TOP) to access dropdown
             self.driver.switch_to.default_content()
             try:
                 self.driver.switch_to.frame("EWARE_TOP")
@@ -135,13 +255,13 @@ class CRMAutoLogin:
                 EC.presence_of_element_located((By.ID, "SELECTMenuOption"))
             )
             print("✅ Found SELECTMenuOption dropdown", file=sys.stderr)
-            
+
             # Get all options and print them for debugging
             options = select_elem.find_elements(By.TAG_NAME, "option")
             print(f"Found {len(options)} options in dropdown:", file=sys.stderr)
             for i, option in enumerate(options):
                 print(f"  {i}: '{option.text}'", file=sys.stderr)
-            
+
             # Select Opportunities option
             found = False
             for option in options:
@@ -154,7 +274,7 @@ class CRMAutoLogin:
                 print("❌ 'Opportunities' option not found in dropdown", file=sys.stderr)
                 return False
             time.sleep(3)  # Wait for page to load after selecting Opportunities
-            
+
             # Switch back to main content frame for invoice input
             self.driver.switch_to.default_content()
             try:
@@ -164,9 +284,12 @@ class CRMAutoLogin:
                 WebDriverWait(self.driver, 10).until(
                     EC.frame_to_be_available_and_switch_to_it((By.NAME, "EWARE_MID"))
                 )
+            
+            print("✅ Successfully set up CRM navigation for already logged in session", file=sys.stderr)
             return True
+            
         except Exception as e:
-            print(f"❌ Login failed: {e}", file=sys.stderr)
+            print(f"❌ Failed to set up CRM navigation: {e}", file=sys.stderr)
             return False
     
     def keep_browser_open(self):
@@ -376,6 +499,8 @@ class CRMAutoLogin:
         print(f"Found headers: {headers}", file=sys.stderr)
         
         results = []
+        seen_records = set()  # To track duplicates
+        
         for row in rows:
             # Only process data rows (ROW1/ROW2)
             if not (row.find('td', class_='ROW1') or row.find('td', class_='ROW2')):
@@ -387,6 +512,8 @@ class CRMAutoLogin:
             n = len(cells)
             used_headers = headers[-n:] if len(headers) >= n else [f'col{i}' for i in range(n)]
             record = {}
+            has_data = False  # Track if this record has any meaningful data
+            
             for i, cell in enumerate(cells):
                 a = cell.find('a')
                 if a and a.get_text(strip=True):
@@ -395,7 +522,18 @@ class CRMAutoLogin:
                     text = cell.get_text(separator=' ', strip=True)
                 text = text.replace('\xa0', '').strip()
                 record[used_headers[i] if i < len(used_headers) else f'col{i}'] = text
-            results.append(record)
+                
+                # Check if this cell has meaningful data (not empty or just whitespace)
+                if text and text.strip():
+                    has_data = True
+            
+            # Only add records that have actual data
+            if has_data:
+                # Create a unique key for this record to avoid duplicates
+                record_key = tuple(sorted(record.items()))
+                if record_key not in seen_records:
+                    seen_records.add(record_key)
+                    results.append(record)
             
         print(f"Parsed {len(results)} records", file=sys.stderr)
         return results

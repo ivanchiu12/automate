@@ -42,22 +42,29 @@ def index():
             
             # Extract invoices (can be multiple from PDF)
             invoice_numbers, parsed_info_list = extract_invoice(file_path)
-            if not invoice_numbers:
-                flash('No invoice numbers detected.', 'danger')
+            if not parsed_info_list:
+                flash('No information extracted from the file.', 'danger')
                 return render_template('result.html', records=parsed_info_list, all_crm_rows=[], logs="")
             else:
-                flash(f'Found {len(invoice_numbers)} invoice(s): {", ".join(invoice_numbers)}. Launching CRM automation...', 'success')
+                # Filter out None invoice numbers for CRM processing
+                valid_invoice_numbers = [inv for inv in invoice_numbers if inv is not None]
+                flash(f'Extracted {len(parsed_info_list)} page(s) with {len(valid_invoice_numbers)} invoice(s). Launching CRM automation...', 'success')
                 
                 try:
-                    # Run CRM script once for all invoices (more efficient)
-                    cmd = [sys.executable, 'automate_crm_login.py', '--headless', '--no-interactive', '--web-output']
-                    cmd.extend(['--invoices'] + invoice_numbers)
+                    # Run CRM script once for all valid invoices (more efficient)
+                    if valid_invoice_numbers:
+                        cmd = [sys.executable, 'automate_crm_login.py', '--headless', '--no-interactive', '--web-output']
+                        cmd.extend(['--invoices'] + valid_invoice_numbers)
+                    else:
+                        # No valid invoices found, skip CRM processing
+                        flash('No valid invoice numbers found for CRM processing.', 'warning')
+                        return render_template('result.html', records=parsed_info_list, all_crm_rows=[], logs="No valid invoice numbers found for CRM processing.")
                     
                     proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=600)  # Longer timeout for multiple invoices
-                    
+
                     # Combine stdout and stderr for logs
                     combined_logs = f"STDOUT:\n{proc.stdout}\n\nSTDERR:\n{proc.stderr}"
-                    
+
                     # Try to parse JSON from stdout if available
                     all_crm_rows = []
                     if proc.stdout:
@@ -70,7 +77,7 @@ def index():
                                     break
                         except:
                             pass
-                    
+
                     if proc.returncode == 0:
                         if all_crm_rows:
                             flash(f'CRM automation completed! Found {len(all_crm_rows)} total records.', 'success')
@@ -78,7 +85,6 @@ def index():
                             flash('CRM automation completed but no records found.', 'warning')
                     else:
                         flash(f'CRM script exited with code {proc.returncode}. Check logs for details.', 'warning')
-                        
                 except subprocess.CalledProcessError as e:
                     flash(f'CRM script error: {e.stderr}', 'danger')
                     all_crm_rows = []
@@ -87,7 +93,7 @@ def index():
                     flash('CRM script timed out after 10 minutes.', 'danger')
                     all_crm_rows = []
                     combined_logs = f"TIMEOUT: {str(e)}\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}"
-                
+
                 flash(f'Processing completed! Total CRM records found: {len(all_crm_rows)}', 'info')
                 return render_template('result.html', records=parsed_info_list, all_crm_rows=all_crm_rows, logs=combined_logs)
         else:

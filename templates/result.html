@@ -58,9 +58,9 @@
         </div>
         <div class="card-body p-0">
             {% if all_crm_rows %}
-                <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+                <div class="table-responsive">
                     <table class="table table-bordered table-sm table-hover mb-0" id="crmTable">
-                        <thead class="table-dark sticky-top">
+                        <thead class="table-dark">
                             <tr>
                                 <th class="text-nowrap" style="min-width: 80px;">Source</th>
                                 {% for key in all_crm_rows[0].keys() %}
@@ -161,11 +161,7 @@ function exportToExcel() {
 </script>
 
 <style>
-.sticky-top {
-    position: sticky;
-    top: 0;
-    z-index: 1020;
-}
+
 
 #crmTable th {
     background-color: #343a40 !important;
@@ -184,21 +180,6 @@ function exportToExcel() {
     background-color: #f8f9fa;
 }
 
-.table-responsive::-webkit-scrollbar {
-    height: 8px;
-}
 
-.table-responsive::-webkit-scrollbar-track {
-    background: #f1f1f1;
-}
-
-.table-responsive::-webkit-scrollbar-thumb {
-    background: #888;
-    border-radius: 4px;
-}
-
-.table-responsive::-webkit-scrollbar-thumb:hover {
-    background: #555;
-}
 </style>
 {% endblock %} 

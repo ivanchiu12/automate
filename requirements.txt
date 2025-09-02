@@ -1,6 +1,6 @@
 DrissionPage>=4.0.0 
 opencv-python
-pytesseract
+requests
 matplotlib 
 openai
 PyMuPDF
