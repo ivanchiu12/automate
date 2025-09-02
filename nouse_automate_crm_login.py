@@ -315,6 +315,10 @@ class CRMAutoLogin:
     
     def search_invoice(self, invoice_number):
         """Search for a single invoice and return results"""
+        # Check if invoice_number is None or empty - if so, search by fee instead
+        if not invoice_number or invoice_number.strip() == '':
+            return self.search_by_fee()
+        
         print(f"🔍 Searching for invoice: {invoice_number}", file=sys.stderr)
         
         # Make sure we're in the correct frame for invoice input
@@ -367,6 +371,69 @@ class CRMAutoLogin:
         # Add source invoice to each record
         for record in records:
             record['_source_invoice'] = invoice_number
+            
+        return records
+
+    def search_by_fee(self, fee_amount=""):
+        """Search by fee when no invoice number is available"""
+        print(f"🔍 Searching by fee (no invoice number available)", file=sys.stderr)
+        
+        # Make sure we're in the correct frame for fee input
+        self.driver.switch_to.default_content()
+        try:
+            self.driver.switch_to.frame("EWARE_MID")
+        except Exception:
+            WebDriverWait(self.driver, 10).until(
+                EC.frame_to_be_available_and_switch_to_it((By.NAME, "EWARE_MID"))
+            )
+        
+        # Find the fee input field
+        try:
+            fee_field = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.ID, "oppo_dwnetlicfee"))
+            )
+        except Exception as e:
+            print(f"❌ Fee input field not found: {e}", file=sys.stderr)
+            return []
+        
+        # Clear and enter fee amount (if provided, otherwise leave empty for general search)
+        fee_field.clear()
+        if fee_amount:
+            fee_field.send_keys(str(fee_amount))
+            print(f"✅ Entered fee amount: {fee_amount}", file=sys.stderr)
+        else:
+            print("✅ Fee field cleared for general search", file=sys.stderr)
+        time.sleep(1)
+        
+        # Try different search button selectors
+        search_button = None
+        try:
+            search_button = self.driver.find_element(By.CSS_SELECTOR, "a.ButtonItem[href*='EntryForm.submit']")
+        except:
+            try:
+                search_button = self.driver.find_element(By.CSS_SELECTOR, "a.ButtonItem img[src*='Search.gif']")
+            except:
+                try:
+                    search_button = self.driver.find_element(By.NAME, "Find")
+                except:
+                    search_button = None
+        
+        if search_button:
+            search_button.click()
+            print("✅ Clicked Search/Find button for fee search", file=sys.stderr)
+            time.sleep(5)
+        else:
+            print("⚠️ Search/Find button not found - you may need to adjust selector", file=sys.stderr)
+            return []
+        
+        # Parse results
+        html = self.driver.page_source
+        records = self._parse_results(html)
+        print(f"✅ Found {len(records)} records for fee search", file=sys.stderr)
+        
+        # Add source info to each record
+        for record in records:
+            record['_source_invoice'] = f"fee_search_{fee_amount}" if fee_amount else "fee_search_general"
             
         return records
 

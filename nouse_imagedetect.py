@@ -11,8 +11,6 @@ from pdf2image import convert_from_path
 from PIL import Image
 import numpy as np
 import json
-from io import BytesIO
-
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Scan and extract info from bank payment advice images")
     parser.add_argument("image_path", nargs="?", default="bank.png", help="Path to the bank image file (default: bank.png)")
