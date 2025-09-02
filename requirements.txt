@@ -8,3 +8,6 @@ pdf2image
 Pillow
 python-dotenv
 flask
+selenium
+bs4
+webdriver_manager
