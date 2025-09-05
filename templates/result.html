@@ -6,6 +6,11 @@
 <div class="text-center mb-5">
     <h2>Automation Results</h2>
     <p class="lead">OCR data extracted by the LLM and the corresponding search results from the CRM.</p>
+    {% if annotated_pdf %}
+    <div class="alert alert-success">
+        <i class="bi bi-check-circle"></i> Annotated PDF with CRM results has been generated and is available for download below.
+    </div>
+    {% endif %}
 </div>
 
 <!-- LLM Extraction Results -->
@@ -53,6 +58,11 @@
                 <button class="btn btn-light btn-sm" onclick="exportToExcel()">
                     <i class="bi bi-file-earmark-excel"></i> Export Excel
                 </button>
+                {% if annotated_pdf %}
+                <a href="{{ url_for('download_annotated_pdf', filename=annotated_pdf) }}" class="btn btn-warning btn-sm">
+                    <i class="bi bi-file-earmark-pdf"></i> Download Annotated PDF
+                </a>
+                {% endif %}
             </div>
             {% endif %}
         </div>
@@ -76,7 +86,7 @@
                         {% for row in all_crm_rows %}
                             <tr>
                                 <td class="text-nowrap fw-bold" style="background-color: #f8f9fa;">
-                                    Record {{ row.get('_record_index', '?') }}<br>
+                                    Page {{ (row.get('_page_index', 0) + 1) if row.get('_page_index') is not none else '?' }}<br>
                                     <small class="text-muted">{{ row.get('_source_invoice', 'N/A') }}</small>
                                 </td>
                                 {% for key, value in row.items() %}

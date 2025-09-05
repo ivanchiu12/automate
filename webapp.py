@@ -4,7 +4,7 @@ Integrated Flask web server with OCR and CRM automation capabilities.
 Combines image processing, text extraction, and CRM automation in one application.
 """
 
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file
 import os
 import uuid
 import sys
@@ -191,6 +191,192 @@ def extract_text_from_pdf_pages(pdf_path):
     
     return "\n------\n".join(all_text)
 
+def find_blank_space_on_page(doc, page_num):
+    """Find a suitable blank space on a PDF page to insert text"""
+    try:
+        page = doc.load_page(page_num)
+        rect = page.rect
+        
+        # Get existing text blocks to identify occupied areas
+        text_blocks = page.get_text("dict")["blocks"]
+        occupied_areas = []
+        
+        for block in text_blocks:
+            if "bbox" in block:
+                occupied_areas.append(fitz.Rect(block["bbox"]))
+        
+        # Define potential positions (larger areas to accommodate more text)
+        potential_positions = [
+            # Larger top right corner
+            fitz.Rect(rect.width * 0.65, 30, rect.width - 10, 250),
+            # Larger bottom right corner
+            fitz.Rect(rect.width * 0.65, rect.height - 200, rect.width - 10, rect.height - 10),
+            # Larger bottom left corner
+            fitz.Rect(10, rect.height - 200, rect.width * 0.35, rect.height - 10),
+            # Wider right margin
+            fitz.Rect(rect.width * 0.75, 200, rect.width - 10, rect.height * 0.7),
+            # Larger top left if nothing else works
+            fitz.Rect(10, 30, rect.width * 0.35, 250),
+            # Full width bottom strip if needed
+            fitz.Rect(10, rect.height - 150, rect.width - 10, rect.height - 10)
+        ]
+        
+        # Find first position that doesn't overlap significantly with existing content
+        for pos in potential_positions:
+            overlap_found = False
+            for occupied in occupied_areas:
+                if pos.intersects(occupied):
+                    intersection = pos & occupied
+                    overlap_ratio = intersection.get_area() / pos.get_area()
+                    if overlap_ratio > 0.3:  # If more than 30% overlap
+                        overlap_found = True
+                        break
+            
+            if not overlap_found:
+                return pos
+        
+        # If no good position found, use small bottom right corner
+        return potential_positions[1]
+        
+    except Exception as e:
+        print(f"❌ Error finding blank space on page {page_num}: {e}")
+        # Return a larger default position
+        return fitz.Rect(400, 400, 750, 650)
+
+def create_annotated_pdf(original_pdf_path, parsed_info_list, all_crm_rows, output_path, invoice_to_page_mapping=None):
+    """Create an annotated PDF with CRM results overlaid on the original pages"""
+    try:
+        doc = fitz.open(original_pdf_path)
+        
+        # Group CRM results by their page index
+        crm_by_page = {}
+        for row in all_crm_rows:
+            page_idx = row.get('_page_index', 0)  # Use _page_index from mapping
+            if page_idx not in crm_by_page:
+                crm_by_page[page_idx] = []
+            crm_by_page[page_idx].append(row)
+        
+        # Process each page
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            
+            # Check if we have CRM results for this page
+            if page_num in crm_by_page:
+                crm_results = crm_by_page[page_num]
+                
+                # Find blank space on page
+                text_rect = find_blank_space_on_page(doc, page_num)
+                
+                # Format CRM results text (more comprehensive)
+                result_text = f"CRM Results (Page {page_num + 1}):\n"
+                result_text += "=" * 25 + "\n"
+                
+                for i, result in enumerate(crm_results):
+                    result_text += f"Record {i + 1}:\n"
+                    
+                    # Get all non-internal fields (not starting with _) and display them
+                    displayed_fields = 0
+                    max_fields_per_record = 15  # Show more fields
+                    
+                    for key, value in result.items():
+                        if (not key.startswith('_') and 
+                            value and 
+                            str(value).strip() and 
+                            str(value).strip() not in ['', 'None', '0'] and 
+                            displayed_fields < max_fields_per_record):
+                            
+                            # Clean and format the value
+                            clean_value = str(value).strip()
+                            # Truncate very long values but keep more characters
+                            if len(clean_value) > 40:
+                                clean_value = clean_value[:37] + "..."
+                            
+                            # Use shorter field names for space efficiency
+                            short_key = key
+                            if len(key) > 12:
+                                short_key = key[:9] + "..."
+                            
+                            result_text += f"• {short_key}: {clean_value}\n"
+                            displayed_fields += 1
+                    
+                    # Add source invoice info
+                    if result.get('_original_invoice_string'):
+                        orig_inv = str(result['_original_invoice_string'])
+                        if len(orig_inv) > 30:
+                            orig_inv = orig_inv[:27] + "..."
+                        result_text += f"• Source Inv: {orig_inv}\n"
+                    
+                    result_text += "\n"  # Add spacing between records
+                
+                # Add extracted page info (compact)
+                if page_num < len(parsed_info_list):
+                    parsed_info = parsed_info_list[page_num]
+                    result_text += f"Extracted Info:\n"
+                    if parsed_info.get('date'):
+                        result_text += f"• Date: {parsed_info['date']}\n"
+                    if parsed_info.get('amount'):
+                        result_text += f"• Amount: {parsed_info['amount']}\n"
+                    if parsed_info.get('payee'):
+                        payee = str(parsed_info['payee'])[:25] + "..." if len(str(parsed_info['payee'])) > 25 else str(parsed_info['payee'])
+                        result_text += f"• Payee: {payee}\n"
+                    if parsed_info.get('reference'):
+                        ref = str(parsed_info['reference'])[:20] + "..." if len(str(parsed_info['reference'])) > 20 else str(parsed_info['reference'])
+                        result_text += f"• Ref: {ref}\n"
+                
+                # Insert text in the blank area with better formatting
+                font_size = 8  # Increased font size for better visibility
+                text_color = (0, 0, 0)  # Black text
+                
+                # Add a white background rectangle with black border
+                bg_rect = fitz.Rect(text_rect.x0 - 5, text_rect.y0 - 5, 
+                                  text_rect.x1 + 5, text_rect.y1 + 5)
+                page.draw_rect(bg_rect, color=(0, 0, 0), fill=(1, 1, 1), width=2)  # Black border with white background
+                
+                # Create a slightly smaller text area inside the background
+                inner_text_rect = fitz.Rect(text_rect.x0 + 5, text_rect.y0 + 5, 
+                                          text_rect.x1 - 5, text_rect.y1 - 5)
+                
+                # Debug: Print text content and rectangle info
+                print(f"📝 Inserting text on page {page_num + 1}:")
+                print(f"   Text length: {len(result_text)} characters")
+                print(f"   Text preview: {result_text[:100]}...")
+                print(f"   Text rect: {inner_text_rect}")
+                print(f"   Font size: {font_size}")
+                
+                # Insert the formatted text with correct parameters
+                inserted = page.insert_textbox(inner_text_rect, result_text, 
+                                  fontsize=font_size, 
+                                  color=text_color,
+                                  fontname="helv",  # Helvetica font
+                                  align=0)  # Left align
+                
+                # Debug: Print if text insertion failed
+                if inserted < 0:
+                    print(f"⚠️ Text insertion failed on page {page_num + 1}, trying alternative method...")
+                    # Try alternative text insertion method
+                    try:
+                        point = fitz.Point(inner_text_rect.x0, inner_text_rect.y0 + 15)  # Start point with offset
+                        page.insert_text(point, result_text, fontsize=font_size, color=text_color, fontname="helv")
+                        print(f"✅ Alternative text insertion successful on page {page_num + 1}")
+                    except Exception as alt_e:
+                        print(f"❌ Alternative text insertion also failed: {alt_e}")
+                else:
+                    print(f"✅ Text insertion successful on page {page_num + 1}")
+                
+                print(f"✅ Added comprehensive CRM results to page {page_num + 1} ({len(crm_results)} records)")
+            else:
+                print(f"ℹ️ No CRM results for page {page_num + 1}")
+        
+        # Save the annotated PDF
+        doc.save(output_path)
+        doc.close()
+        print(f"✅ Annotated PDF saved to: {output_path}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error creating annotated PDF: {e}")
+        return False
+
 def parse_bank_info(text):
     """Parse key information using xAI Grok API - handles both single page and multi-page text"""
     load_dotenv()
@@ -206,31 +392,42 @@ def parse_bank_info(text):
     
     # Check if this is multi-page text (contains ------)
     if "------" in text:
+        # Count pages to ensure proper mapping
+        pages = text.split("------")
+        page_count = len(pages)
+        
         prompt = f"""Extract information from this multi-page bank payment advice text. Each page is separated by "------".
+                
+                CRITICAL REQUIREMENTS:
+                1. You MUST return exactly {page_count} records - one for each page
+                2. Process pages in order (PAGE 1, PAGE 2, etc.)
+                3. If a page has multiple invoice numbers, put ALL of them in the invoice field separated by commas
+                4. Even if a page appears empty or has no payment info, still create a record for it
+                
                 For each page, extract all available information:
-                - date: The payment date (if available)
-                - amount: The payment amount with currency (if available)
-                - payee: The recipient name (if available)
-                - payer: The sender name (if available)
-                - reference: Any reference number (if available)
-                - invoice: The invoice number (e.g., 25-AVS-RES-00109-RN) (if available)
-                - page_number: The page number this information came from
+                - date: The payment date (if available, otherwise null)
+                - amount: The payment amount with currency (if available, otherwise null)
+                - payee: The recipient name (if available, otherwise null)
+                - payer: The sender name (if available, otherwise null)
+                - reference: Any reference number (if available, otherwise null)
+                - invoice: ALL invoice numbers found on this page (e.g., "25-AVS-RES-00109-RN" or "25-AVS-RET-00161-RN,25-AVS-RET-00162-RN" if multiple), otherwise null
+                - page_number: The page number (1, 2, 3, etc.)
 
-                Return as a JSON array of objects. Process ALL pages, even if they don't contain complete payment information or invoice numbers.
+                Return exactly {page_count} objects as a JSON array. Each page gets exactly one record.
 
                 Text:
                 {text}
 
-                Respond only with valid JSON array.
+                Respond only with valid JSON array containing exactly {page_count} objects.
                 """
     else:
         prompt = f"""Extract the following information from this bank payment advice text as a JSON object:
-                - date: The payment date (if available)
-                - amount: The payment amount with currency (if available)
-                - payee: The recipient name (if available)
-                - payer: The sender name (if available)
-                - reference: Any reference number (if available)
-                - invoice: The invoice number (e.g., 25-AVS-RES-00109-RN) (if available)
+                - date: The payment date (if available, otherwise null)
+                - amount: The payment amount with currency (if available, otherwise null)
+                - payee: The recipient name (if available, otherwise null)
+                - payer: The sender name (if available, otherwise null)
+                - reference: Any reference number (if available, otherwise null)
+                - invoice: ALL invoice numbers found (e.g., "25-AVS-RES-00109-RN" or "25-AVS-RET-00161-RN,25-AVS-RET-00162-RN" if multiple), otherwise null
 
                 Text:
                 {text}
@@ -249,6 +446,13 @@ def parse_bank_info(text):
         )
         extracted_json = response.choices[0].message.content.strip()
         
+        # Print Grok results to terminal
+        print("\n" + "="*60)
+        print("🤖 GROK LLM RESPONSE:")
+        print("="*60)
+        print(extracted_json)
+        print("="*60 + "\n")
+        
         # Remove any markdown code block formatting if present
         if extracted_json.startswith("```json"):
             extracted_json = extracted_json[7:]
@@ -257,6 +461,11 @@ def parse_bank_info(text):
         extracted_json = extracted_json.strip()
         
         parsed_data = json.loads(extracted_json)
+        
+        # Print parsed data for verification
+        print("📋 PARSED DATA:")
+        print(json.dumps(parsed_data, indent=2, ensure_ascii=False))
+        print("="*60 + "\n")
         
         # Ensure we always return a list
         if isinstance(parsed_data, dict):
@@ -271,45 +480,80 @@ def parse_bank_info(text):
         print(f"❌ Error calling xAI API: {e}")
         return []
 
-def extract_invoice(file_path: str) -> tuple[list[str], list[dict]]:
-    """Extract invoice numbers and parsed info from image or PDF. Returns (invoice_numbers, parsed_info_list)"""
+def split_invoice_numbers(invoice_string):
+    """Split comma-separated invoice numbers into individual invoices"""
+    if not invoice_string:
+        return [None]
+    
+    # Split by comma and clean up each invoice number
+    invoices = []
+    for inv in invoice_string.split(','):
+        inv = inv.strip()
+        if inv:
+            invoices.append(inv)
+    
+    return invoices if invoices else [None]
+
+def extract_invoice(file_path: str) -> tuple[list[str], list[dict], list[dict]]:
+    """Extract invoice numbers and parsed info from image or PDF. 
+    Returns (all_invoice_numbers, parsed_info_list, invoice_to_page_mapping)"""
     if is_pdf_file(file_path):
         print(f"📄 Processing PDF file: {file_path}")
         extracted_text = extract_text_from_pdf_pages(file_path)
         if not extracted_text:
             print(f"❌ Failed to extract text from PDF: {file_path}")
-            return [], []
+            return [], [], []
         
         parsed_info_list = parse_bank_info(extracted_text)
-        # Include all invoice numbers, including None values for pages without invoices
-        invoice_numbers = [info.get('invoice') for info in parsed_info_list]
-        return invoice_numbers, parsed_info_list
     else:
         print(f"🖼️ Processing image file: {file_path}")
         image = cv2.imread(file_path)
         if image is None:
             print(f"❌ Failed to load image: {file_path}")
-            return [], []
+            return [], [], []
 
         preprocessed = preprocess_image(image)
         extracted_text = extract_text_with_api(preprocessed)
         parsed_info_list = parse_bank_info(extracted_text)
-        # Include all invoice numbers, including None values for pages without invoices
-        invoice_numbers = [info.get('invoice') for info in parsed_info_list]
-        return invoice_numbers, parsed_info_list
+    
+    # Process each page's invoices and create mapping
+    all_invoice_numbers = []
+    invoice_to_page_mapping = []
+    
+    for page_idx, info in enumerate(parsed_info_list):
+        page_invoice_string = info.get('invoice')
+        page_invoices = split_invoice_numbers(page_invoice_string)
+        
+        # Add each invoice with its page mapping
+        for invoice in page_invoices:
+            all_invoice_numbers.append(invoice)
+            invoice_to_page_mapping.append({
+                'invoice': invoice,
+                'page_index': page_idx,
+                'page_info': info,
+                'original_invoice_string': page_invoice_string
+            })
+    
+    print(f"📋 Extracted {len(all_invoice_numbers)} total invoices from {len(parsed_info_list)} pages")
+    for i, mapping in enumerate(invoice_to_page_mapping):
+        print(f"  Invoice {i+1}: {mapping['invoice']} (Page {mapping['page_index']+1})")
+    
+    return all_invoice_numbers, parsed_info_list, invoice_to_page_mapping
 
 # ===============================
 # CRM AUTOMATION FUNCTIONS
 # ===============================
 
 class CRMAutoLogin:
-    def __init__(self, headless: bool = False, invoice_number: str = None, invoice_numbers: list = None, return_json: bool = False, no_interactive: bool = False, web_output: bool = False):
+    def __init__(self, headless: bool = False, invoice_number: str = None, invoice_numbers: list = None, 
+                 invoice_to_page_mapping: list = None, return_json: bool = False, no_interactive: bool = False, web_output: bool = False):
         self.url = "http://192.168.1.152/crm/eware.dll/go"
         self.username = "ivan.chiu"
         self.password = "25207090"
         self.headless = headless
         self.invoice_number = invoice_number
         self.invoice_numbers = invoice_numbers or ([invoice_number] if invoice_number else [])
+        self.invoice_to_page_mapping = invoice_to_page_mapping or []
         self.return_json = return_json
         self.no_interactive = no_interactive
         self.web_output = web_output
@@ -644,6 +888,7 @@ class CRMAutoLogin:
         # Add source invoice to each record
         for record in records:
             record['_source_invoice'] = invoice_number
+            record['Source'] = invoice_number  # Also add as 'Source' for display
             
         return records
 
@@ -705,8 +950,10 @@ class CRMAutoLogin:
         print(f"✅ Found {len(records)} records for fee search")
         
         # Add source info to each record
+        source_value = f"fee_search_{fee_amount}" if fee_amount else "fee_search_general"
         for record in records:
-            record['_source_invoice'] = f"fee_search_{fee_amount}" if fee_amount else "fee_search_general"
+            record['_source_invoice'] = source_value
+            record['Source'] = source_value  # Also add as 'Source' for display
             
         return records
 
@@ -729,9 +976,22 @@ class CRMAutoLogin:
                 for i, invoice in enumerate(self.invoice_numbers):
                     print(f"📄 Processing invoice {i+1}/{len(self.invoice_numbers)}: {invoice}")
                     records = self.search_invoice(invoice)
-                    # Add record index for identification
+                    
+                    # Add mapping information to each record
                     for record in records:
-                        record['_record_index'] = i + 1
+                        record['_invoice_index'] = i
+                        # Find corresponding mapping info
+                        if i < len(self.invoice_to_page_mapping):
+                            mapping = self.invoice_to_page_mapping[i]
+                            record['_page_index'] = mapping['page_index']
+                            record['_page_info'] = mapping['page_info']
+                            record['_original_invoice_string'] = mapping['original_invoice_string']
+                        else:
+                            # Fallback for backward compatibility
+                            record['_page_index'] = i
+                            record['_page_info'] = {}
+                            record['_original_invoice_string'] = invoice
+                    
                     all_records.extend(records)
                     
                     # Small delay between searches
@@ -741,7 +1001,10 @@ class CRMAutoLogin:
                 # Backward compatibility for single invoice
                 records = self.search_invoice(self.invoice_number)
                 for record in records:
-                    record['_record_index'] = 1
+                    record['_invoice_index'] = 0
+                    record['_page_index'] = 0
+                    record['_page_info'] = {}
+                    record['_original_invoice_string'] = self.invoice_number
                 all_records = records
             
             return True, all_records
@@ -879,22 +1142,23 @@ def index():
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
             
-            # Extract invoices (can be multiple from PDF)
-            invoice_numbers, parsed_info_list = extract_invoice(file_path)
+            # Extract invoices (can be multiple from PDF with proper page mapping)
+            all_invoice_numbers, parsed_info_list, invoice_to_page_mapping = extract_invoice(file_path)
             if not parsed_info_list:
                 flash('No information extracted from the file.', 'danger')
                 return render_template('result.html', records=parsed_info_list, all_crm_rows=[], logs="")
             else:
                 # Filter out None invoice numbers for CRM processing
-                valid_invoice_numbers = [inv for inv in invoice_numbers if inv is not None]
-                flash(f'Extracted {len(parsed_info_list)} page(s) with {len(valid_invoice_numbers)} invoice(s). Launching CRM automation...', 'success')
+                valid_invoices = [inv for inv in all_invoice_numbers if inv is not None]
+                flash(f'Extracted {len(parsed_info_list)} page(s) with {len(valid_invoices)} invoice(s). Launching CRM automation...', 'success')
                 
                 # Initialize CRM automation directly (no subprocess)
                 try:
                     print("🚀 Starting integrated CRM automation...")
                     crm = CRMAutoLogin(
                         headless=True,
-                        invoice_numbers=invoice_numbers,  # Include all invoice numbers (including None)
+                        invoice_numbers=all_invoice_numbers,  # Include all invoice numbers (including None)
+                        invoice_to_page_mapping=invoice_to_page_mapping,  # Pass the mapping
                         return_json=True,
                         no_interactive=True,
                         web_output=True
@@ -919,12 +1183,49 @@ def index():
                     all_crm_rows = []
                     combined_logs = f"ERROR: {str(e)}"
 
+                # Generate annotated PDF if original file was a PDF and we have results
+                annotated_pdf_filename = None
+                if is_pdf_file(file_path) and (all_crm_rows or parsed_info_list):
+                    try:
+                        annotated_pdf_filename = f"annotated_{uuid.uuid4().hex}_{filename}"
+                        annotated_pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], annotated_pdf_filename)
+                        
+                        success = create_annotated_pdf(file_path, parsed_info_list, all_crm_rows, annotated_pdf_path, invoice_to_page_mapping)
+                        if success:
+                            flash('Annotated PDF generated successfully!', 'success')
+                        else:
+                            annotated_pdf_filename = None
+                            flash('Failed to generate annotated PDF.', 'warning')
+                    except Exception as e:
+                        print(f"❌ Error generating annotated PDF: {e}")
+                        annotated_pdf_filename = None
+                        flash(f'Error generating annotated PDF: {str(e)}', 'warning')
+
                 flash(f'Processing completed! Total CRM records found: {len(all_crm_rows)}', 'info')
-                return render_template('result.html', records=parsed_info_list, all_crm_rows=all_crm_rows, logs=combined_logs)
+                return render_template('result.html', 
+                                     records=parsed_info_list, 
+                                     all_crm_rows=all_crm_rows, 
+                                     logs=combined_logs,
+                                     annotated_pdf=annotated_pdf_filename)
         else:
             flash('File type not allowed. Please upload an image.', 'danger')
             return redirect(request.url)
     return render_template('index.html')
+
+@app.route('/download/<filename>')
+def download_annotated_pdf(filename):
+    """Serve the annotated PDF for download"""
+    try:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        if os.path.exists(file_path) and filename.startswith('annotated_'):
+            return send_file(file_path, as_attachment=True, 
+                           download_name=f"results_{filename.split('_', 2)[-1]}")
+        else:
+            flash('File not found or invalid filename.', 'danger')
+            return redirect(url_for('index'))
+    except Exception as e:
+        flash(f'Error downloading file: {str(e)}', 'danger')
+        return redirect(url_for('index'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5002, debug=True) 
