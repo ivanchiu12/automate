@@ -52,6 +52,12 @@
             <h4><i class="bi bi-journal-text"></i> CRM Search Results ({{ all_crm_rows|length }} records found)</h4>
             {% if all_crm_rows %}
             <div>
+                <button class="btn btn-success btn-sm" onclick="saveChanges()">
+                    <i class="bi bi-check-circle"></i> Save Changes
+                </button>
+                <button class="btn btn-primary btn-sm" onclick="generateAnnotatedPDF()">
+                    <i class="bi bi-file-earmark-pdf-fill"></i> Generate Annotated PDF
+                </button>
                 <button class="btn btn-light btn-sm" onclick="exportToCSV()">
                     <i class="bi bi-download"></i> Export CSV
                 </button>
@@ -60,7 +66,7 @@
                 </button>
                 {% if annotated_pdf %}
                 <a href="{{ url_for('download_annotated_pdf', filename=annotated_pdf) }}" class="btn btn-warning btn-sm">
-                    <i class="bi bi-file-earmark-pdf"></i> Download Annotated PDF
+                    <i class="bi bi-file-earmark-pdf"></i> Download Original PDF
                 </a>
                 {% endif %}
             </div>
@@ -72,29 +78,104 @@
                     <table class="table table-bordered table-sm table-hover mb-0" id="crmTable">
                         <thead class="table-dark">
                             <tr>
-                                <th class="text-nowrap" style="min-width: 80px;">Source</th>
-                                {% for key in all_crm_rows[0].keys() %}
-                                    {% if not key.startswith('_') %}
-                                        <th class="text-nowrap" style="min-width: 120px; max-width: 200px;">
-                                            {{ key.replace('_', ' ').title() }}
-                                        </th>
-                                    {% endif %}
-                                {% endfor %}
+                                <!-- Define consistent column order -->
+                                <th class="text-nowrap resizable-header" style="min-width: 80px; position: relative;">
+                                    Page
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                    Source
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                    Opened
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 150px; position: relative;">
+                                    Parent Company Name
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 150px; position: relative;">
+                                    Premises Name
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 200px; position: relative;">
+                                    Premises Address
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 100px; position: relative;">
+                                    Salutation
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                    Contact Name
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                    Title
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 150px; position: relative;">
+                                    Business E-Mail
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                    Phone Number
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                    Licence Category
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                    Expected Closed
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 100px; position: relative;">
+                                    Stage
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 150px; position: relative;">
+                                    Payment Received Date
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                    Invoice No
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                    Net Licence Fee
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 100px; position: relative;">
+                                    Territory
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                    Assigned To
+                                    <div class="resize-handle"></div>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
+                        {% set column_order = ['Page', 'Source', 'Opened', 'Parent Company Name', 'Premises Name', 'Premises Address', 'Salutation', 'Contact Name', 'Title', 'Business E-Mail', 'Phone Number', 'Licence Category', 'Expected Closed', 'Stage', 'Payment Received Date', 'Invoice No', 'Net Licence Fee', 'Territory', 'Assigned To'] %}
                         {% for row in all_crm_rows %}
-                            <tr>
-                                <td class="text-nowrap fw-bold" style="background-color: #f8f9fa;">
-                                    Page {{ (row.get('_page_index', 0) + 1) if row.get('_page_index') is not none else '?' }}<br>
-                                    <small class="text-muted">{{ row.get('_source_invoice', 'N/A') }}</small>
-                                </td>
-                                {% for key, value in row.items() %}
-                                    {% if not key.startswith('_') %}
-                                        <td class="text-nowrap" style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;" title="{{ value }}">
-                                            {{ value }}
-                                        </td>
-                                    {% endif %}
+                            <tr data-page-index="{{ row.get('_page_index', 0) }}">
+                                {% for column in column_order %}
+                                    <td style="max-width: 200px; position: relative;" {% if column == 'Page' %}class="page-column"{% endif %}>
+                                        {% set value = row.get(column, '') %}
+                                        {% if column == 'Page' %}
+                                            <span class="fw-bold text-primary">{{ value }}</span>
+                                        {% else %}
+                                            <input type="text" 
+                                                   class="form-control form-control-sm editable-cell border-0 bg-transparent" 
+                                                   value="{{ value }}" 
+                                                   data-field="{{ column }}" 
+                                                   data-row-id="{{ loop.index0 }}"
+                                                   style="padding: 2px 4px; min-height: 28px;"
+                                                   placeholder="Enter {{ column.replace('_', ' ').lower() }}">
+                                        {% endif %}
+                                    </td>
                                 {% endfor %}
                             </tr>
                         {% endfor %}
@@ -137,20 +218,125 @@
 {% endif %}
 
 <script>
+// Handle editable cells and column resizing
+document.addEventListener('DOMContentLoaded', function() {
+    const editableCells = document.querySelectorAll('.editable-cell');
+    
+    editableCells.forEach(cell => {
+        // Add visual feedback on focus
+        cell.addEventListener('focus', function() {
+            this.style.backgroundColor = '#fff3cd';
+            this.style.border = '1px solid #ffeaa7';
+        });
+        
+        cell.addEventListener('blur', function() {
+            this.style.backgroundColor = 'transparent';
+            this.style.border = '0';
+        });
+        
+        // Auto-resize input based on content
+        cell.addEventListener('input', function() {
+            const tempSpan = document.createElement('span');
+            tempSpan.style.visibility = 'hidden';
+            tempSpan.style.position = 'absolute';
+            tempSpan.style.whiteSpace = 'nowrap';
+            tempSpan.style.font = window.getComputedStyle(this).font;
+            tempSpan.textContent = this.value || this.placeholder;
+            document.body.appendChild(tempSpan);
+            
+            const newWidth = Math.max(100, tempSpan.offsetWidth + 20);
+            this.style.width = newWidth + 'px';
+            
+            document.body.removeChild(tempSpan);
+        });
+    });
+    
+    // Initialize column resizing
+    initColumnResizing();
+});
+
+function initColumnResizing() {
+    const table = document.getElementById('crmTable');
+    const headers = table.querySelectorAll('.resizable-header');
+    
+    headers.forEach((header, index) => {
+        const resizeHandle = header.querySelector('.resize-handle');
+        let isResizing = false;
+        let startX = 0;
+        let startWidth = 0;
+        
+        resizeHandle.addEventListener('mousedown', function(e) {
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = parseInt(document.defaultView.getComputedStyle(header).width, 10);
+            
+            document.addEventListener('mousemove', doResize);
+            document.addEventListener('mouseup', stopResize);
+            
+            // Prevent text selection during resize
+            e.preventDefault();
+        });
+        
+        function doResize(e) {
+            if (!isResizing) return;
+            
+            const width = startWidth + e.clientX - startX;
+            const minWidth = 80; // Minimum column width
+            const newWidth = Math.max(minWidth, width);
+            
+            header.style.width = newWidth + 'px';
+            
+            // Also update corresponding cells in the column
+            const columnCells = table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`);
+            columnCells.forEach(cell => {
+                cell.style.width = newWidth + 'px';
+                cell.style.maxWidth = newWidth + 'px';
+            });
+        }
+        
+        function stopResize() {
+            isResizing = false;
+            document.removeEventListener('mousemove', doResize);
+            document.removeEventListener('mouseup', stopResize);
+        }
+    });
+}
+
 function exportToCSV() {
     const table = document.getElementById('crmTable');
     const rows = table.querySelectorAll('tr');
     let csv = [];
     
-    for (let i = 0; i < rows.length; i++) {
+    // Define column headers in consistent order
+    const headers = ['Page', 'Source', 'Opened', 'Parent Company Name', 'Premises Name', 
+                    'Premises Address', 'Salutation', 'Contact Name', 'Title', 'Business E-Mail', 
+                    'Phone Number', 'Licence Category', 'Expected Closed', 'Stage', 
+                    'Payment Received Date', 'Invoice No', 'Net Licence Fee', 'Territory', 'Assigned To'];
+    
+    // Add header row
+    csv.push(headers.map(h => '"' + h + '"').join(','));
+    
+    // Add data rows
+    for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
-        const cols = row.querySelectorAll('td, th');
+        const cols = row.querySelectorAll('td');
         const rowData = [];
         
         for (let j = 0; j < cols.length; j++) {
-            let cell = cols[j].textContent.trim();
-            cell = cell.replace(/"/g, '""');
-            rowData.push('"' + cell + '"');
+            const input = cols[j].querySelector('input.editable-cell');
+            const span = cols[j].querySelector('span');
+            let cellValue = '';
+            
+            if (input) {
+                cellValue = input.value.trim();
+            } else if (span) {
+                cellValue = span.textContent.trim();
+            } else {
+                cellValue = cols[j].textContent.trim();
+            }
+            
+            cellValue = cellValue.replace(/"/g, '""');
+            rowData.push('"' + cellValue + '"');
         }
         
         csv.push(rowData.join(','));
@@ -168,11 +354,116 @@ function exportToExcel() {
     // For Excel export, we'll use a simple CSV approach that Excel can open
     exportToCSV();
 }
+
+// Add save functionality
+function saveChanges() {
+    const editableCells = document.querySelectorAll('.editable-cell');
+    const changes = [];
+    
+    editableCells.forEach(cell => {
+        const rowId = cell.getAttribute('data-row-id');
+        const field = cell.getAttribute('data-field');
+        const value = cell.value;
+        
+        changes.push({
+            rowId: rowId,
+            field: field,
+            value: value
+        });
+    });
+    
+    console.log('Changes to save:', changes);
+    // Here you could send the changes to the backend via AJAX if needed
+    alert('Changes saved locally! Export CSV/Excel to save permanently.');
+}
+
+// Generate annotated PDF with current table data
+function generateAnnotatedPDF() {
+    const editableCells = document.querySelectorAll('.editable-cell');
+    const tableData = [];
+    
+    // Collect current table data
+    const table = document.getElementById('crmTable');
+    const rows = table.querySelectorAll('tbody tr');
+    
+    rows.forEach((row, rowIndex) => {
+        const rowData = {};
+        const cells = row.querySelectorAll('td');
+        
+        cells.forEach((cell, cellIndex) => {
+            const input = cell.querySelector('input.editable-cell');
+            const span = cell.querySelector('span');
+            let cellValue = '';
+            let fieldName = '';
+            
+            if (input) {
+                cellValue = input.value.trim();
+                fieldName = input.getAttribute('data-field');
+            } else if (span) {
+                cellValue = span.textContent.trim();
+                fieldName = 'Page'; // This is the page column
+            } else {
+                cellValue = cell.textContent.trim();
+            }
+            
+            if (fieldName) {
+                rowData[fieldName] = cellValue;
+            }
+        });
+        
+        // Get page index from row attribute
+        const pageIndex = row.getAttribute('data-page-index');
+        if (pageIndex !== null) {
+            rowData['_page_index'] = parseInt(pageIndex);
+        }
+        
+        tableData.push(rowData);
+    });
+    
+    // Show loading state
+    const button = event.target;
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="bi bi-hourglass-split"></i> Generating PDF...';
+    button.disabled = true;
+    
+    // Send data to backend
+    fetch('/generate_annotated_pdf', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            tableData: tableData
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        button.innerHTML = originalText;
+        button.disabled = false;
+        
+        if (data.success) {
+            // Create download link
+            const link = document.createElement('a');
+            link.href = '/download/' + data.filename;
+            link.download = data.filename;
+            link.click();
+            
+            // Show success message
+            alert('Annotated PDF generated successfully!');
+        } else {
+            alert('Error generating PDF: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        button.innerHTML = originalText;
+        button.disabled = false;
+        console.error('Error:', error);
+        alert('Error generating PDF: ' + error.message);
+    });
+}
 </script>
 
 <style>
-
-
 #crmTable th {
     background-color: #343a40 !important;
     color: white !important;
@@ -184,12 +475,80 @@ function exportToExcel() {
 #crmTable td {
     vertical-align: middle;
     font-size: 0.9rem;
+    padding: 4px 8px;
 }
 
 #crmTable tbody tr:hover {
     background-color: #f8f9fa;
 }
 
+.editable-cell {
+    transition: all 0.2s ease-in-out;
+    border-radius: 3px;
+}
 
+.editable-cell:focus {
+    box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.25) !important;
+    outline: none !important;
+}
+
+.editable-cell:hover {
+    background-color: #f8f9fa !important;
+    border: 1px solid #dee2e6 !important;
+}
+
+/* Style for page column */
+.page-column {
+    background-color: #e3f2fd !important;
+    font-weight: bold;
+    text-align: center;
+}
+
+/* Empty row styling for pages without results */
+tr[data-page-index] td {
+    border-top: 2px solid #dee2e6;
+}
+
+tr[data-page-index="0"] td {
+    border-top: none;
+}
+
+/* Column resizing styles */
+.resizable-header {
+    position: relative;
+    user-select: none;
+}
+
+.resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 5px;
+    height: 100%;
+    background: transparent;
+    cursor: col-resize;
+    z-index: 10;
+}
+
+.resize-handle:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.resize-handle:active {
+    background: rgba(255, 255, 255, 0.5);
+}
+
+/* Ensure table layout is fixed for proper resizing */
+#crmTable {
+    table-layout: fixed;
+    width: 100%;
+}
+
+#crmTable th,
+#crmTable td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 </style>
 {% endblock %} 

@@ -4,7 +4,7 @@ Integrated Flask web server with OCR and CRM automation capabilities.
 Combines image processing, text extraction, and CRM automation in one application.
 """
 
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, jsonify
 import os
 import uuid
 import sys
@@ -241,7 +241,7 @@ def find_blank_space_on_page(doc, page_num):
     except Exception as e:
         print(f"❌ Error finding blank space on page {page_num}: {e}")
         # Return a larger default position
-        return fitz.Rect(400, 400, 750, 650)
+        return fitz.Rect(400, 400, 850, 750)
 
 def create_annotated_pdf(original_pdf_path, parsed_info_list, all_crm_rows, output_path, invoice_to_page_mapping=None):
     """Create an annotated PDF with CRM results overlaid on the original pages"""
@@ -324,7 +324,7 @@ def create_annotated_pdf(original_pdf_path, parsed_info_list, all_crm_rows, outp
                         result_text += f"• Ref: {ref}\n"
                 
                 # Insert text in the blank area with better formatting
-                font_size = 8  # Increased font size for better visibility
+                font_size = 6  # Increased font size for better visibility
                 text_color = (0, 0, 0)  # Black text
                 
                 # Add a white background rectangle with black border
@@ -493,6 +493,67 @@ def split_invoice_numbers(invoice_string):
             invoices.append(inv)
     
     return invoices if invoices else [None]
+
+def ensure_all_pages_represented(all_crm_rows, parsed_info_list, invoice_to_page_mapping):
+    """Ensure all pages are represented in CRM results, even if no results found"""
+    if not parsed_info_list:
+        return all_crm_rows
+    
+    # Define all expected columns in consistent order
+    expected_columns = [
+        'Page', 'Source', 'Opened', 'Parent Company Name', 'Premises Name', 
+        'Premises Address', 'Salutation', 'Contact Name', 'Title', 'Business E-Mail', 
+        'Phone Number', 'Licence Category', 'Expected Closed', 'Stage', 
+        'Payment Received Date', 'Invoice No', 'Net Licence Fee', 'Territory', 'Assigned To'
+    ]
+    
+    # Ensure all existing rows have all columns
+    for row in all_crm_rows:
+        for col in expected_columns:
+            if col not in row:
+                row[col] = ''
+    
+    # Create a set of pages that have results
+    pages_with_results = set()
+    for row in all_crm_rows:
+        page_index = row.get('_page_index')
+        if page_index is not None:
+            pages_with_results.add(page_index)
+    
+    # Add empty rows for pages without results
+    for page_idx in range(len(parsed_info_list)):
+        if page_idx not in pages_with_results:
+            # Find the corresponding invoice mapping for this page
+            invoice_for_page = None
+            for mapping in invoice_to_page_mapping:
+                if mapping['page_index'] == page_idx:
+                    invoice_for_page = mapping['invoice']
+                    break
+            
+            # Create an empty editable row for this page with all expected columns
+            empty_row = {
+                '_page_index': page_idx,
+                '_invoice_index': page_idx,
+                '_page_info': parsed_info_list[page_idx] if page_idx < len(parsed_info_list) else {},
+                '_original_invoice_string': invoice_for_page,
+                '_source_invoice': invoice_for_page or f"Page {page_idx + 1}",
+            }
+            
+            # Add all expected columns
+            for col in expected_columns:
+                if col == 'Page':
+                    empty_row[col] = f"Page {page_idx + 1}"
+                elif col == 'Source':
+                    empty_row[col] = invoice_for_page or "No Invoice"
+                else:
+                    empty_row[col] = ''
+                    
+            all_crm_rows.append(empty_row)
+    
+    # Sort by page index to maintain order
+    all_crm_rows.sort(key=lambda x: x.get('_page_index', 0))
+    
+    return all_crm_rows
 
 def extract_invoice(file_path: str) -> tuple[list[str], list[dict], list[dict]]:
     """Extract invoice numbers and parsed info from image or PDF. 
@@ -885,10 +946,10 @@ class CRMAutoLogin:
         records = self._parse_results(html)
         print(f"✅ Found {len(records)} records for invoice {invoice_number}")
         
-        # Add source invoice to each record
+        # Add source invoice to each record (only invoice number, no page info)
         for record in records:
             record['_source_invoice'] = invoice_number
-            record['Source'] = invoice_number  # Also add as 'Source' for display
+            record['Source'] = invoice_number  # Only the invoice number for display
             
         return records
 
@@ -986,11 +1047,14 @@ class CRMAutoLogin:
                             record['_page_index'] = mapping['page_index']
                             record['_page_info'] = mapping['page_info']
                             record['_original_invoice_string'] = mapping['original_invoice_string']
+                            # Add separate Page column
+                            record['Page'] = f"Page {mapping['page_index'] + 1}"
                         else:
                             # Fallback for backward compatibility
                             record['_page_index'] = i
                             record['_page_info'] = {}
                             record['_original_invoice_string'] = invoice
+                            record['Page'] = f"Page {i + 1}"
                     
                     all_records.extend(records)
                     
@@ -1005,6 +1069,7 @@ class CRMAutoLogin:
                     record['_page_index'] = 0
                     record['_page_info'] = {}
                     record['_original_invoice_string'] = self.invoice_number
+                    record['Page'] = "Page 1"
                 all_records = records
             
             return True, all_records
@@ -1166,6 +1231,9 @@ def index():
                     
                     success, all_crm_rows = crm.run()
                     
+                    # Ensure all pages are represented, even if no results found
+                    all_crm_rows = ensure_all_pages_represented(all_crm_rows, parsed_info_list, invoice_to_page_mapping)
+                    
                     if success:
                         if all_crm_rows:
                             flash(f'CRM automation completed! Found {len(all_crm_rows)} total records.', 'success')
@@ -1226,6 +1294,83 @@ def download_annotated_pdf(filename):
     except Exception as e:
         flash(f'Error downloading file: {str(e)}', 'danger')
         return redirect(url_for('index'))
+
+@app.route('/generate_annotated_pdf', methods=['POST'])
+def generate_annotated_pdf():
+    """Generate annotated PDF with user's edited data"""
+    try:
+        data = request.get_json()
+        table_data = data.get('tableData', [])
+        
+        if not table_data:
+            return jsonify({'success': False, 'error': 'No table data provided'}), 400
+        
+        # We need to find the original PDF file to annotate
+        # For now, we'll use the most recent PDF file in uploads
+        pdf_files = [f for f in os.listdir(app.config['UPLOAD_FOLDER']) 
+                    if f.lower().endswith('.pdf') and not f.startswith('annotated_')]
+        
+        if not pdf_files:
+            return jsonify({'success': False, 'error': 'No original PDF file found'}), 400
+        
+        # Use the most recent PDF file
+        pdf_files.sort(key=lambda f: os.path.getmtime(os.path.join(app.config['UPLOAD_FOLDER'], f)), reverse=True)
+        original_pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], pdf_files[0])
+        
+        # Create filename for the new annotated PDF
+        annotated_filename = f"updated_annotated_{uuid.uuid4().hex}_{pdf_files[0]}"
+        annotated_pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], annotated_filename)
+        
+        # Group table data by page index
+        crm_by_page = {}
+        parsed_info_list = []
+        
+        for row in table_data:
+            page_idx = row.get('_page_index', 0)
+            if page_idx not in crm_by_page:
+                crm_by_page[page_idx] = []
+            crm_by_page[page_idx].append(row)
+            
+            # Create parsed info entry if not exists
+            while len(parsed_info_list) <= page_idx:
+                parsed_info_list.append({})
+        
+        # Convert grouped data back to list format for the PDF function
+        all_crm_rows = []
+        for page_idx in sorted(crm_by_page.keys()):
+            all_crm_rows.extend(crm_by_page[page_idx])
+        
+        # Create invoice to page mapping (simplified)
+        invoice_to_page_mapping = []
+        for page_idx in range(len(parsed_info_list)):
+            invoice_to_page_mapping.append({
+                'page_index': page_idx,
+                'invoice': f"Page {page_idx + 1}",
+                'page_info': parsed_info_list[page_idx] if page_idx < len(parsed_info_list) else {},
+                'original_invoice_string': f"Page {page_idx + 1}"
+            })
+        
+        # Generate the annotated PDF
+        success = create_annotated_pdf(
+            original_pdf_path, 
+            parsed_info_list, 
+            all_crm_rows, 
+            annotated_pdf_path, 
+            invoice_to_page_mapping
+        )
+        
+        if success:
+            return jsonify({
+                'success': True, 
+                'filename': annotated_filename,
+                'message': 'Annotated PDF generated successfully with your edits!'
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Failed to generate annotated PDF'}), 500
+            
+    except Exception as e:
+        print(f"❌ Error in generate_annotated_pdf route: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5002, debug=True) 
