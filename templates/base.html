@@ -272,12 +272,12 @@ window.LoadingManager = {
 
 // Auto-hide loading on page load if it's showing
 document.addEventListener('DOMContentLoaded', function() {
-    // Hide loading overlay if page loads normally
-    setTimeout(function() {
-        if (window.location.pathname !== '/') {
-            LoadingManager.hide();
-        }
-    }, 500);
+    // Always hide loading overlay when page loads, unless we're on the index page during form submission
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay && overlay.style.display === 'flex' && window.location.pathname !== '/') {
+        // This means we navigated to a result page, so hide the loading
+        LoadingManager.hide();
+    }
 });
 </script>
 

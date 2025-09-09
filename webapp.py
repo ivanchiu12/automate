@@ -1333,15 +1333,12 @@ def index():
             return redirect(request.url)
     return render_template('index.html')
 
-@app.route('/download/<filename>')
-def download_annotated_pdf(filename):
-    """Serve the annotated PDF for download"""
+
+@app.route('/serve_pdf/<filename>')
+def serve_pdf(filename):
+    """Serve generated PDF files for download"""
     try:
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        print(f"🔍 Download request for: {filename}")
-        print(f"📁 Full path: {file_path}")
-        print(f"📄 File exists: {os.path.exists(file_path)}")
-        
         if os.path.exists(file_path) and ('annotated_' in filename or 'updated_annotated_' in filename):
             # Extract the original filename for download
             if filename.startswith('updated_annotated_'):
@@ -1361,16 +1358,11 @@ def download_annotated_pdf(filename):
             else:
                 download_name = filename
             
-            print(f"✅ Serving file with download name: {download_name}")
             return send_file(file_path, as_attachment=True, download_name=download_name)
         else:
-            print(f"❌ File not found or invalid filename: {filename}")
-            flash('File not found or invalid filename.', 'danger')
-            return redirect(url_for('index'))
+            return jsonify({'error': 'File not found'}), 404
     except Exception as e:
-        print(f"❌ Error downloading file: {e}")
-        flash(f'Error downloading file: {str(e)}', 'danger')
-        return redirect(url_for('index'))
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/generate_annotated_pdf', methods=['POST'])
 def generate_annotated_pdf():
