@@ -191,8 +191,37 @@ def extract_text_from_pdf_pages(pdf_path):
     
     return "\n------\n".join(all_text)
 
-def find_blank_space_on_page(doc, page_num):
-    """Find a suitable blank space on a PDF page to insert text"""
+def calculate_text_dimensions(text, font_size, font_name='helv'):
+    """Calculate approximate text dimensions for given text and font size"""
+    try:
+        # Rough estimation based on font metrics
+        # These are approximations for common fonts
+        char_width_ratio = {
+            'helv': 0.6,
+            'times': 0.55,
+            'cour': 0.6,
+            'cjk': 0.8,
+            'china-ss': 0.8,
+            'china-ts': 0.8
+        }
+        
+        # Get character width multiplier
+        char_width = char_width_ratio.get(font_name, 0.6) * font_size
+        line_height = font_size * 1.2  # Standard line height
+        
+        lines = text.split('\n')
+        max_line_width = max(len(line) for line in lines) if lines else 0
+        text_height = len(lines) * line_height
+        text_width = max_line_width * char_width
+        
+        return text_width, text_height
+    except Exception as e:
+        print(f"⚠️ Error calculating text dimensions: {e}")
+        # Return conservative estimates
+        return 300, 200
+
+def find_available_spaces_on_page(doc, page_num, required_width=None, required_height=None):
+    """Find all available spaces on a PDF page, sorted by preference"""
     try:
         page = doc.load_page(page_num)
         rect = page.rect
@@ -205,46 +234,208 @@ def find_blank_space_on_page(doc, page_num):
             if "bbox" in block:
                 occupied_areas.append(fitz.Rect(block["bbox"]))
         
-        # Define potential positions (larger areas to accommodate more text)
+        # Define potential positions with different sizes
+        # Each position has a priority score (lower = better)
         potential_positions = [
-            # Larger top right corner
-            fitz.Rect(rect.width * 0.65, 30, rect.width - 10, 250),
-            # Larger bottom right corner
-            fitz.Rect(rect.width * 0.65, rect.height - 200, rect.width - 10, rect.height - 10),
-            # Larger bottom left corner
-            fitz.Rect(10, rect.height - 200, rect.width * 0.35, rect.height - 10),
-            # Wider right margin
-            fitz.Rect(rect.width * 0.75, 200, rect.width - 10, rect.height * 0.7),
-            # Larger top left if nothing else works
-            fitz.Rect(10, 30, rect.width * 0.35, 250),
-            # Full width bottom strip if needed
-            fitz.Rect(10, rect.height - 150, rect.width - 10, rect.height - 10)
+            # Top right corner - various sizes
+            {'rect': fitz.Rect(rect.width * 0.65, 30, rect.width - 10, 300), 'priority': 1},
+            {'rect': fitz.Rect(rect.width * 0.7, 30, rect.width - 10, 250), 'priority': 2},
+            {'rect': fitz.Rect(rect.width * 0.75, 30, rect.width - 10, 200), 'priority': 3},
+            
+            # Bottom right corner - various sizes
+            {'rect': fitz.Rect(rect.width * 0.65, rect.height - 250, rect.width - 10, rect.height - 10), 'priority': 4},
+            {'rect': fitz.Rect(rect.width * 0.7, rect.height - 200, rect.width - 10, rect.height - 10), 'priority': 5},
+            {'rect': fitz.Rect(rect.width * 0.75, rect.height - 150, rect.width - 10, rect.height - 10), 'priority': 6},
+            
+            # Right margin - full height
+            {'rect': fitz.Rect(rect.width * 0.75, 100, rect.width - 10, rect.height - 100), 'priority': 7},
+            {'rect': fitz.Rect(rect.width * 0.8, 50, rect.width - 10, rect.height - 50), 'priority': 8},
+            
+            # Bottom left corner
+            {'rect': fitz.Rect(10, rect.height - 250, rect.width * 0.35, rect.height - 10), 'priority': 9},
+            {'rect': fitz.Rect(10, rect.height - 200, rect.width * 0.3, rect.height - 10), 'priority': 10},
+            
+            # Top left corner
+            {'rect': fitz.Rect(10, 30, rect.width * 0.35, 300), 'priority': 11},
+            {'rect': fitz.Rect(10, 30, rect.width * 0.3, 250), 'priority': 12},
+            
+            # Full width bottom strip
+            {'rect': fitz.Rect(10, rect.height - 200, rect.width - 10, rect.height - 10), 'priority': 13},
+            {'rect': fitz.Rect(10, rect.height - 150, rect.width - 10, rect.height - 10), 'priority': 14},
+            
+            # Left margin
+            {'rect': fitz.Rect(10, 100, rect.width * 0.25, rect.height - 100), 'priority': 15},
         ]
         
-        # Find first position that doesn't overlap significantly with existing content
+        # Filter positions based on size requirements
+        if required_width or required_height:
+            filtered_positions = []
+            for pos in potential_positions:
+                pos_rect = pos['rect']
+                width_ok = not required_width or pos_rect.width >= required_width
+                height_ok = not required_height or pos_rect.height >= required_height
+                if width_ok and height_ok:
+                    filtered_positions.append(pos)
+            potential_positions = filtered_positions
+        
+        # Check for overlaps and return available positions
+        available_positions = []
         for pos in potential_positions:
+            pos_rect = pos['rect']
             overlap_found = False
+            
             for occupied in occupied_areas:
-                if pos.intersects(occupied):
-                    intersection = pos & occupied
-                    overlap_ratio = intersection.get_area() / pos.get_area()
+                if pos_rect.intersects(occupied):
+                    intersection = pos_rect & occupied
+                    overlap_ratio = intersection.get_area() / pos_rect.get_area()
                     if overlap_ratio > 0.3:  # If more than 30% overlap
                         overlap_found = True
                         break
             
             if not overlap_found:
-                return pos
+                available_positions.append(pos)
         
-        # If no good position found, use small bottom right corner
-        return potential_positions[1]
+        # Sort by priority (lower priority number = better position)
+        available_positions.sort(key=lambda x: x['priority'])
+        
+        return [pos['rect'] for pos in available_positions]
         
     except Exception as e:
-        print(f"❌ Error finding blank space on page {page_num}: {e}")
-        # Return a larger default position
-        return fitz.Rect(400, 400, 850, 750)
+        print(f"❌ Error finding available spaces on page {page_num}: {e}")
+        # Return a default position
+        return [fitz.Rect(400, 400, 850, 750)]
 
-def create_annotated_pdf(original_pdf_path, parsed_info_list, all_crm_rows, output_path, invoice_to_page_mapping=None):
-    """Create an annotated PDF with CRM results overlaid on the original pages"""
+def find_blank_space_on_page(doc, page_num, required_width=None, required_height=None):
+    """Find a suitable blank space on a PDF page to insert text"""
+    available_spaces = find_available_spaces_on_page(doc, page_num, required_width, required_height)
+    
+    if available_spaces:
+        return available_spaces[0]  # Return the best available space
+    else:
+        # Fallback to a default position if no space found
+        page = doc.load_page(page_num)
+        rect = page.rect
+        return fitz.Rect(rect.width * 0.65, rect.height - 200, rect.width - 10, rect.height - 10)
+
+def format_single_record_text(result, record_num, max_fields=15):
+    """Format a single CRM record for display"""
+    record_text = f"Record {record_num}:\n"
+    
+    # Get all non-internal fields (not starting with _) and display them
+    displayed_fields = 0
+    
+    for key, value in result.items():
+        if (not key.startswith('_') and 
+            value and 
+            str(value).strip() and 
+            str(value).strip() not in ['', 'None', '0'] and 
+            displayed_fields < max_fields):
+            
+            # Clean and format the value
+            clean_value = str(value).strip()
+            # Truncate very long values but keep more characters
+            if len(clean_value) > 40:
+                clean_value = clean_value[:37] + "..."
+            
+            # Use shorter field names for space efficiency
+            short_key = key
+            if len(key) > 12:
+                short_key = key[:9] + "..."
+            
+            record_text += f"• {short_key}: {clean_value}\n"
+            displayed_fields += 1
+    
+    # Add source invoice info
+    if result.get('_original_invoice_string'):
+        orig_inv = str(result['_original_invoice_string'])
+        if len(orig_inv) > 30:
+            orig_inv = orig_inv[:27] + "..."
+        record_text += f"• Source Inv: {orig_inv}\n"
+    
+    return record_text
+
+def format_extracted_info_text(parsed_info):
+    """Format extracted page info for display"""
+    if not parsed_info:
+        return ""
+    
+    info_text = "Extracted Info:\n"
+    if parsed_info.get('date'):
+        info_text += f"• Date: {parsed_info['date']}\n"
+    if parsed_info.get('amount'):
+        info_text += f"• Amount: {parsed_info['amount']}\n"
+    if parsed_info.get('payee'):
+        payee = str(parsed_info['payee'])[:25] + "..." if len(str(parsed_info['payee'])) > 25 else str(parsed_info['payee'])
+        info_text += f"• Payee: {payee}\n"
+    if parsed_info.get('reference'):
+        ref = str(parsed_info['reference'])[:20] + "..." if len(str(parsed_info['reference'])) > 20 else str(parsed_info['reference'])
+        info_text += f"• Ref: {ref}\n"
+    
+    return info_text
+
+def insert_text_with_auto_resize(page, text, available_rect, font_size, font_type, text_color=(0, 0, 0)):
+    """Insert text with automatic resizing if it doesn't fit"""
+    # Determine fonts to try based on user selection
+    if font_type == 'auto':
+        fonts_to_try = ["cjk", "china-ss", "china-ts", "helv", "times", "cour"]
+    else:
+        fonts_to_try = [font_type]
+        fallback_fonts = ["cjk", "china-ss", "china-ts", "helv", "times", "cour"]
+        for fallback in fallback_fonts:
+            if fallback != font_type and fallback not in fonts_to_try:
+                fonts_to_try.append(fallback)
+    
+    # Try different font sizes starting from the requested size
+    font_sizes_to_try = [font_size]
+    if font_size > 4:
+        font_sizes_to_try.extend([font_size - 1, font_size - 2])
+    if font_size > 6:
+        font_sizes_to_try.append(font_size - 3)
+    
+    # Add a white background rectangle with black border
+    bg_rect = fitz.Rect(available_rect.x0 - 5, available_rect.y0 - 5, 
+                      available_rect.x1 + 5, available_rect.y1 + 5)
+    page.draw_rect(bg_rect, color=(0, 0, 0), fill=(1, 1, 1), width=2)
+    
+    # Create inner text area
+    inner_rect = fitz.Rect(available_rect.x0 + 5, available_rect.y0 + 5, 
+                         available_rect.x1 - 5, available_rect.y1 - 5)
+    
+    for current_font_size in font_sizes_to_try:
+        for font_name in fonts_to_try:
+            try:
+                # Try to insert text with current font and size
+                inserted = page.insert_textbox(inner_rect, text, 
+                                             fontsize=current_font_size, 
+                                             color=text_color,
+                                             fontname=font_name,
+                                             align=0)
+                
+                if inserted >= 0:
+                    print(f"✅ Text inserted successfully with font: {font_name}, size: {current_font_size}")
+                    return True, font_name, current_font_size
+                    
+            except Exception as e:
+                continue
+    
+    # If textbox method fails, try alternative point-based insertion
+    print("⚠️ Textbox insertion failed, trying point-based method...")
+    for current_font_size in font_sizes_to_try:
+        for font_name in fonts_to_try:
+            try:
+                point = fitz.Point(inner_rect.x0, inner_rect.y0 + 15)
+                page.insert_text(point, text, fontsize=current_font_size, 
+                               color=text_color, fontname=font_name)
+                print(f"✅ Text inserted with alternative method - font: {font_name}, size: {current_font_size}")
+                return True, font_name, current_font_size
+            except Exception as e:
+                continue
+    
+    print("❌ All text insertion methods failed")
+    return False, None, None
+
+def create_annotated_pdf(original_pdf_path, parsed_info_list, all_crm_rows, output_path, invoice_to_page_mapping=None, font_size=6, font_type='auto'):
+    """Create an annotated PDF with CRM results overlaid on the original pages with auto-resizing and multi-area support"""
     try:
         print(f"📖 Opening original PDF: {original_pdf_path}")
         if not os.path.exists(original_pdf_path):
@@ -257,7 +448,7 @@ def create_annotated_pdf(original_pdf_path, parsed_info_list, all_crm_rows, outp
         # Group CRM results by their page index
         crm_by_page = {}
         for row in all_crm_rows:
-            page_idx = row.get('_page_index', 0)  # Use _page_index from mapping
+            page_idx = row.get('_page_index', 0)
             if page_idx not in crm_by_page:
                 crm_by_page[page_idx] = []
             crm_by_page[page_idx].append(row)
@@ -269,114 +460,109 @@ def create_annotated_pdf(original_pdf_path, parsed_info_list, all_crm_rows, outp
             # Check if we have CRM results for this page
             if page_num in crm_by_page:
                 crm_results = crm_by_page[page_num]
+                print(f"📄 Processing page {page_num + 1} with {len(crm_results)} CRM records")
                 
-                # Find blank space on page
-                text_rect = find_blank_space_on_page(doc, page_num)
+                # Get extracted page info
+                parsed_info = parsed_info_list[page_num] if page_num < len(parsed_info_list) else {}
                 
-                # Format CRM results text (more comprehensive)
-                result_text = f"CRM Results (Page {page_num + 1}):\n"
-                result_text += "=" * 25 + "\n"
+                # If we have multiple records, try to fit them in separate areas
+                if len(crm_results) > 1:
+                    print(f"🔄 Multiple records detected, attempting to separate into different areas...")
+                    
+                    # Create individual texts for each record
+                    record_texts = []
+                    for i, result in enumerate(crm_results):
+                        header = f"CRM Results (Page {page_num + 1}) - Part {i + 1}:\n" + "=" * 30 + "\n"
+                        record_text = header + format_single_record_text(result, i + 1)
+                        record_texts.append(record_text)
+                    
+                    # Add extracted info to the last record
+                    if parsed_info:
+                        extracted_text = format_extracted_info_text(parsed_info)
+                        if extracted_text:
+                            record_texts[-1] += "\n" + extracted_text
+                    
+                    # Try to place each record in a different area
+                    available_spaces = find_available_spaces_on_page(doc, page_num)
+                    placed_successfully = True
+                    
+                    for i, record_text in enumerate(record_texts):
+                        if i < len(available_spaces):
+                            # Calculate required dimensions for this text
+                            req_width, req_height = calculate_text_dimensions(record_text, font_size, font_type)
+                            
+                            # Use the available space
+                            text_rect = available_spaces[i]
+                            
+                            # Check if the space is large enough, if not find a better one
+                            if text_rect.width < req_width or text_rect.height < req_height:
+                                better_spaces = find_available_spaces_on_page(doc, page_num, req_width, req_height)
+                                if better_spaces:
+                                    text_rect = better_spaces[0]
+                            
+                            print(f"📝 Placing record {i + 1} in area: {text_rect}")
+                            success, font_used, size_used = insert_text_with_auto_resize(
+                                page, record_text, text_rect, font_size, font_type
+                            )
+                            
+                            if not success:
+                                print(f"⚠️ Failed to place record {i + 1} separately")
+                                placed_successfully = False
+                                break
+                        else:
+                            print(f"⚠️ No available space for record {i + 1}")
+                            placed_successfully = False
+                            break
+                    
+                    if placed_successfully:
+                        print(f"✅ Successfully placed all {len(crm_results)} records in separate areas")
+                        continue
+                    else:
+                        print(f"⚠️ Could not place all records separately, falling back to combined approach")
+                
+                # Fallback: Combine all records in a single area (original approach but with auto-resize)
+                print(f"📝 Combining all records into single area with auto-resize...")
+                
+                # Format combined text
+                result_text = f"CRM Results (Page {page_num + 1}):\n" + "=" * 25 + "\n"
                 
                 for i, result in enumerate(crm_results):
-                    result_text += f"Record {i + 1}:\n"
-                    
-                    # Get all non-internal fields (not starting with _) and display them
-                    displayed_fields = 0
-                    max_fields_per_record = 15  # Show more fields
-                    
-                    for key, value in result.items():
-                        if (not key.startswith('_') and 
-                            value and 
-                            str(value).strip() and 
-                            str(value).strip() not in ['', 'None', '0'] and 
-                            displayed_fields < max_fields_per_record):
-                            
-                            # Clean and format the value
-                            clean_value = str(value).strip()
-                            # Truncate very long values but keep more characters
-                            if len(clean_value) > 40:
-                                clean_value = clean_value[:37] + "..."
-                            
-                            # Use shorter field names for space efficiency
-                            short_key = key
-                            if len(key) > 12:
-                                short_key = key[:9] + "..."
-                            
-                            result_text += f"• {short_key}: {clean_value}\n"
-                            displayed_fields += 1
-                    
-                    # Add source invoice info
-                    if result.get('_original_invoice_string'):
-                        orig_inv = str(result['_original_invoice_string'])
-                        if len(orig_inv) > 30:
-                            orig_inv = orig_inv[:27] + "..."
-                        result_text += f"• Source Inv: {orig_inv}\n"
-                    
-                    result_text += "\n"  # Add spacing between records
+                    result_text += format_single_record_text(result, i + 1) + "\n"
                 
-                # Add extracted page info (compact)
-                if page_num < len(parsed_info_list):
-                    parsed_info = parsed_info_list[page_num]
-                    result_text += f"Extracted Info:\n"
-                    if parsed_info.get('date'):
-                        result_text += f"• Date: {parsed_info['date']}\n"
-                    if parsed_info.get('amount'):
-                        result_text += f"• Amount: {parsed_info['amount']}\n"
-                    if parsed_info.get('payee'):
-                        payee = str(parsed_info['payee'])[:25] + "..." if len(str(parsed_info['payee'])) > 25 else str(parsed_info['payee'])
-                        result_text += f"• Payee: {payee}\n"
-                    if parsed_info.get('reference'):
-                        ref = str(parsed_info['reference'])[:20] + "..." if len(str(parsed_info['reference'])) > 20 else str(parsed_info['reference'])
-                        result_text += f"• Ref: {ref}\n"
+                # Add extracted page info
+                if parsed_info:
+                    extracted_text = format_extracted_info_text(parsed_info)
+                    if extracted_text:
+                        result_text += extracted_text
                 
-                # Insert text in the blank area with better formatting
-                font_size = 6  # Increased font size for better visibility
-                text_color = (0, 0, 0)  # Black text
+                # Calculate required dimensions
+                req_width, req_height = calculate_text_dimensions(result_text, font_size, font_type)
                 
-                # Add a white background rectangle with black border
-                bg_rect = fitz.Rect(text_rect.x0 - 5, text_rect.y0 - 5, 
-                                  text_rect.x1 + 5, text_rect.y1 + 5)
-                page.draw_rect(bg_rect, color=(0, 0, 0), fill=(1, 1, 1), width=2)  # Black border with white background
+                # Find best available space
+                text_rect = find_blank_space_on_page(doc, page_num, req_width, req_height)
                 
-                # Create a slightly smaller text area inside the background
-                inner_text_rect = fitz.Rect(text_rect.x0 + 5, text_rect.y0 + 5, 
-                                          text_rect.x1 - 5, text_rect.y1 - 5)
-                
-                # Debug: Print text content and rectangle info
-                print(f"📝 Inserting text on page {page_num + 1}:")
+                print(f"📝 Inserting combined text on page {page_num + 1}:")
                 print(f"   Text length: {len(result_text)} characters")
-                print(f"   Text preview: {result_text[:100]}...")
-                print(f"   Text rect: {inner_text_rect}")
-                print(f"   Font size: {font_size}")
+                print(f"   Required dimensions: {req_width:.1f} x {req_height:.1f}")
+                print(f"   Available space: {text_rect.width:.1f} x {text_rect.height:.1f}")
                 
-                # Insert the formatted text with correct parameters
-                inserted = page.insert_textbox(inner_text_rect, result_text, 
-                                  fontsize=font_size, 
-                                  color=text_color,
-                                  fontname="helv",  # Helvetica font
-                                  align=0)  # Left align
+                # Insert text with auto-resize
+                success, font_used, size_used = insert_text_with_auto_resize(
+                    page, result_text, text_rect, font_size, font_type
+                )
                 
-                # Debug: Print if text insertion failed
-                if inserted < 0:
-                    print(f"⚠️ Text insertion failed on page {page_num + 1}, trying alternative method...")
-                    # Try alternative text insertion method
-                    try:
-                        point = fitz.Point(inner_text_rect.x0, inner_text_rect.y0 + 15)  # Start point with offset
-                        page.insert_text(point, result_text, fontsize=font_size, color=text_color, fontname="helv")
-                        print(f"✅ Alternative text insertion successful on page {page_num + 1}")
-                    except Exception as alt_e:
-                        print(f"❌ Alternative text insertion also failed: {alt_e}")
+                if success:
+                    print(f"✅ Added CRM results to page {page_num + 1} ({len(crm_results)} records) with font: {font_used}, size: {size_used}")
                 else:
-                    print(f"✅ Text insertion successful on page {page_num + 1}")
+                    print(f"❌ Failed to add CRM results to page {page_num + 1}")
                 
-                print(f"✅ Added comprehensive CRM results to page {page_num + 1} ({len(crm_results)} records)")
             else:
                 print(f"ℹ️ No CRM results for page {page_num + 1}")
         
         # Save the annotated PDF with error handling
         try:
             print(f"💾 Saving annotated PDF to: {output_path}")
-            doc.save(output_path, garbage=4, deflate=True)  # Add compression and cleanup
+            doc.save(output_path, garbage=4, deflate=True)
             doc.close()
             
             # Verify the saved file
@@ -1311,7 +1497,7 @@ def index():
                         annotated_pdf_filename = f"annotated_{uuid.uuid4().hex}_{filename}"
                         annotated_pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], annotated_pdf_filename)
                         
-                        success = create_annotated_pdf(file_path, parsed_info_list, all_crm_rows, annotated_pdf_path, invoice_to_page_mapping)
+                        success = create_annotated_pdf(file_path, parsed_info_list, all_crm_rows, annotated_pdf_path, invoice_to_page_mapping, 6, 'auto')
                         if success:
                             flash('Annotated PDF generated successfully!', 'success')
                         else:
@@ -1370,6 +1556,8 @@ def generate_annotated_pdf():
     try:
         data = request.get_json()
         table_data = data.get('tableData', [])
+        font_size = data.get('fontSize', 6)  # Default to 6px if not provided
+        font_type = data.get('fontType', 'auto')  # Default to auto if not provided
         
         if not table_data:
             return jsonify({'success': False, 'error': 'No table data provided'}), 400
@@ -1427,12 +1615,16 @@ def generate_annotated_pdf():
         
         # Generate the annotated PDF
         print(f"🚀 Calling create_annotated_pdf function...")
+        print(f"   📝 Using font size: {font_size}px")
+        print(f"   🔤 Using font type: {font_type}")
         success = create_annotated_pdf(
             original_pdf_path, 
             parsed_info_list, 
             all_crm_rows, 
             annotated_pdf_path, 
-            invoice_to_page_mapping
+            invoice_to_page_mapping,
+            font_size,
+            font_type
         )
         
         # Verify the file was created and is valid

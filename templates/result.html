@@ -48,22 +48,51 @@
 <!-- CRM Search Results -->
 <div class="mb-5">
     <div class="card shadow-sm">
-        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
-            <h4><i class="bi bi-journal-text"></i> CRM Search Results ({{ all_crm_rows|length }} records found)</h4>
+        <div class="card-header bg-info text-white">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h4><i class="bi bi-journal-text"></i> CRM Search Results ({{ all_crm_rows|length }} records found)</h4>
+                {% if all_crm_rows %}
+                <div>
+                    <button class="btn btn-success btn-sm" onclick="saveChanges()">
+                        <i class="bi bi-check-circle"></i> Save Changes
+                    </button>
+                    <button class="btn btn-primary btn-sm" onclick="generateAnnotatedPDF()">
+                        <i class="bi bi-file-earmark-pdf-fill"></i> Generate Annotated PDF
+                    </button>
+                    <button class="btn btn-light btn-sm" onclick="exportToCSV()">
+                        <i class="bi bi-download"></i> Export CSV
+                    </button>
+                    <button class="btn btn-light btn-sm" onclick="exportToExcel()">
+                        <i class="bi bi-file-earmark-excel"></i> Export Excel
+                    </button>
+                </div>
+                {% endif %}
+            </div>
             {% if all_crm_rows %}
-            <div>
-                <button class="btn btn-success btn-sm" onclick="saveChanges()">
-                    <i class="bi bi-check-circle"></i> Save Changes
-                </button>
-                <button class="btn btn-primary btn-sm" onclick="generateAnnotatedPDF()">
-                    <i class="bi bi-file-earmark-pdf-fill"></i> Generate Annotated PDF
-                </button>
-                <button class="btn btn-light btn-sm" onclick="exportToCSV()">
-                    <i class="bi bi-download"></i> Export CSV
-                </button>
-                <button class="btn btn-light btn-sm" onclick="exportToExcel()">
-                    <i class="bi bi-file-earmark-excel"></i> Export Excel
-                </button>
+            <div class="d-flex flex-wrap gap-3 align-items-center">
+                <div class="d-flex align-items-center gap-2">
+                    <label for="columnSelector" class="form-label mb-0 small">Show Columns:</label>
+                    <button class="btn btn-outline-light btn-sm" onclick="toggleColumnSelector()">
+                        <i class="bi bi-eye"></i> Manage Columns
+                    </button>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <label for="textSizeSlider" class="form-label mb-0 small">PDF Text Size:</label>
+                    <input type="range" class="form-range" id="textSizeSlider" min="4" max="12" value="6" style="width: 80px;">
+                    <span id="textSizeValue" class="small">6px</span>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <label for="fontSelector" class="form-label mb-0 small">Font Type:</label>
+                    <select class="form-select form-select-sm" id="fontSelector" style="width: 120px;">
+                        <option value="auto">Auto (Best)</option>
+                        <option value="cjk">CJK (Chinese/日本語/한국어)</option>
+                        <option value="china-ss">简体中文</option>
+                        <option value="china-ts">繁體中文</option>
+                        <option value="helv">Helvetica</option>
+                        <option value="times">Times</option>
+                        <option value="cour">Courier</option>
+                    </select>
+                </div>
             </div>
             {% endif %}
         </div>
@@ -76,81 +105,81 @@
                 <div class="table-responsive" style="max-height: 80vh; overflow-x: auto; overflow-y: auto;">
                     <table class="table table-bordered table-sm table-hover mb-0" id="crmTable">
                         <thead class="table-dark">
-                            <tr>
+                            <tr id="tableHeader">
                                 <!-- Define consistent column order -->
-                                <th class="text-nowrap resizable-header" style="min-width: 80px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Page" data-column="Page" style="min-width: 80px; position: relative;">
                                     Page
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Source" data-column="Source" style="min-width: 120px; position: relative;">
                                     Source
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Opened" data-column="Opened" style="min-width: 120px; position: relative;">
                                     Opened
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 150px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Parent-Company-Name" data-column="Parent Company Name" style="min-width: 150px; position: relative;">
                                     Parent Company Name
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 150px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Premises-Name" data-column="Premises Name" style="min-width: 150px; position: relative;">
                                     Premises Name
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 200px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Premises-Address" data-column="Premises Address" style="min-width: 200px; position: relative;">
                                     Premises Address
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 100px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Salutation" data-column="Salutation" style="min-width: 100px; position: relative;">
                                     Salutation
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Contact-Name" data-column="Contact Name" style="min-width: 120px; position: relative;">
                                     Contact Name
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Title" data-column="Title" style="min-width: 120px; position: relative;">
                                     Title
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 150px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Business-E-Mail" data-column="Business E-Mail" style="min-width: 150px; position: relative;">
                                     Business E-Mail
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Phone-Number" data-column="Phone Number" style="min-width: 120px; position: relative;">
                                     Phone Number
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Licence-Category" data-column="Licence Category" style="min-width: 120px; position: relative;">
                                     Licence Category
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Expected-Closed" data-column="Expected Closed" style="min-width: 120px; position: relative;">
                                     Expected Closed
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 100px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Stage" data-column="Stage" style="min-width: 100px; position: relative;">
                                     Stage
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 150px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Payment-Received-Date" data-column="Payment Received Date" style="min-width: 150px; position: relative;">
                                     Payment Received Date
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Invoice-No" data-column="Invoice No" style="min-width: 120px; position: relative;">
                                     Invoice No
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Net-Licence-Fee" data-column="Net Licence Fee" style="min-width: 120px; position: relative;">
                                     Net Licence Fee
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 100px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Territory" data-column="Territory" style="min-width: 100px; position: relative;">
                                     Territory
                                     <div class="resize-handle"></div>
                                 </th>
-                                <th class="text-nowrap resizable-header" style="min-width: 120px; position: relative;">
+                                <th class="text-nowrap resizable-header column-Assigned-To" data-column="Assigned To" style="min-width: 120px; position: relative;">
                                     Assigned To
                                     <div class="resize-handle"></div>
                                 </th>
@@ -161,7 +190,7 @@
                         {% for row in all_crm_rows %}
                             <tr data-page-index="{{ row.get('_page_index', 0) }}">
                                 {% for column in column_order %}
-                                    <td style="max-width: 200px; position: relative;" {% if column == 'Page' %}class="page-column"{% endif %}>
+                                    <td class="cell-{{ column.replace(' ', '-') }} {% if column == 'Page' %}page-column{% endif %}" data-column="{{ column }}" style="max-width: 200px; position: relative;">
                                         {% set value = row.get(column, '') %}
                                         {% if column == 'Page' %}
                                             <span class="fw-bold text-primary">{{ value }}</span>
@@ -186,6 +215,43 @@
                     <p class="text-warning">No matching records found in the CRM for the processed invoices.</p>
                 </div>
             {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Column Selector Modal -->
+<div class="modal fade" id="columnSelectorModal" tabindex="-1" aria-labelledby="columnSelectorModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="columnSelectorModalLabel">
+                    <i class="bi bi-eye"></i> Manage Table Columns
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">Select which columns to display in the table:</p>
+                <div class="row" id="columnCheckboxes">
+                    <!-- Column checkboxes will be generated by JavaScript -->
+                </div>
+                <div class="mt-3">
+                    <button class="btn btn-outline-primary btn-sm" onclick="selectAllColumns()">
+                        <i class="bi bi-check-all"></i> Select All
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="deselectAllColumns()">
+                        <i class="bi bi-x-square"></i> Deselect All
+                    </button>
+                    <button class="btn btn-outline-info btn-sm" onclick="resetToDefault()">
+                        <i class="bi bi-arrow-clockwise"></i> Reset to Default
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="applyColumnChanges()">
+                    <i class="bi bi-check-circle"></i> Apply Changes
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -217,6 +283,11 @@
 {% endif %}
 
 <script>
+// Global variables for column management
+let allColumns = ['Page', 'Source', 'Opened', 'Parent Company Name', 'Premises Name', 'Premises Address', 'Salutation', 'Contact Name', 'Title', 'Business E-Mail', 'Phone Number', 'Licence Category', 'Expected Closed', 'Stage', 'Payment Received Date', 'Invoice No', 'Net Licence Fee', 'Territory', 'Assigned To'];
+let visibleColumns = [...allColumns]; // Start with all columns visible
+let defaultColumns = ['Page', 'Source', 'Parent Company Name', 'Premises Name', 'Contact Name', 'Business E-Mail', 'Phone Number', 'Invoice No', 'Net Licence Fee'];
+
 // Handle editable cells and column resizing
 document.addEventListener('DOMContentLoaded', function() {
     const editableCells = document.querySelectorAll('.editable-cell');
@@ -252,6 +323,12 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Initialize column resizing
     initColumnResizing();
+    
+    // Initialize column selector
+    initColumnSelector();
+    
+    // Initialize text size slider
+    initTextSizeSlider();
 });
 
 function initColumnResizing() {
@@ -377,6 +454,119 @@ function saveChanges() {
 }
 
 // Generate annotated PDF with current table data
+// Column management functions
+function initColumnSelector() {
+    const checkboxContainer = document.getElementById('columnCheckboxes');
+    if (!checkboxContainer) return;
+    
+    checkboxContainer.innerHTML = '';
+    
+    allColumns.forEach(column => {
+        const div = document.createElement('div');
+        div.className = 'col-md-6 col-lg-4 mb-2';
+        
+        const checkboxDiv = document.createElement('div');
+        checkboxDiv.className = 'form-check';
+        
+        const checkbox = document.createElement('input');
+        checkbox.className = 'form-check-input';
+        checkbox.type = 'checkbox';
+        checkbox.id = `col-${column.replace(/\s+/g, '-')}`;
+        checkbox.value = column;
+        checkbox.checked = visibleColumns.includes(column);
+        
+        const label = document.createElement('label');
+        label.className = 'form-check-label';
+        label.htmlFor = checkbox.id;
+        label.textContent = column;
+        
+        checkboxDiv.appendChild(checkbox);
+        checkboxDiv.appendChild(label);
+        div.appendChild(checkboxDiv);
+        checkboxContainer.appendChild(div);
+    });
+}
+
+function toggleColumnSelector() {
+    const modal = new bootstrap.Modal(document.getElementById('columnSelectorModal'));
+    modal.show();
+}
+
+function selectAllColumns() {
+    const checkboxes = document.querySelectorAll('#columnCheckboxes input[type="checkbox"]');
+    checkboxes.forEach(cb => cb.checked = true);
+}
+
+function deselectAllColumns() {
+    const checkboxes = document.querySelectorAll('#columnCheckboxes input[type="checkbox"]');
+    checkboxes.forEach(cb => {
+        if (cb.value !== 'Page') { // Always keep Page column visible
+            cb.checked = false;
+        }
+    });
+}
+
+function resetToDefault() {
+    const checkboxes = document.querySelectorAll('#columnCheckboxes input[type="checkbox"]');
+    checkboxes.forEach(cb => {
+        cb.checked = defaultColumns.includes(cb.value);
+    });
+}
+
+function applyColumnChanges() {
+    const checkboxes = document.querySelectorAll('#columnCheckboxes input[type="checkbox"]:checked');
+    visibleColumns = Array.from(checkboxes).map(cb => cb.value);
+    
+    // Always ensure Page column is visible
+    if (!visibleColumns.includes('Page')) {
+        visibleColumns.unshift('Page');
+    }
+    
+    updateTableColumnVisibility();
+    
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('columnSelectorModal'));
+    modal.hide();
+    
+    showSuccessToast('Column visibility updated successfully!');
+}
+
+function updateTableColumnVisibility() {
+    const table = document.getElementById('crmTable');
+    if (!table) return;
+    
+    // Hide/show header columns
+    allColumns.forEach((column, index) => {
+        const headerClass = `column-${column.replace(/\s+/g, '-')}`;
+        const cellClass = `cell-${column.replace(/\s+/g, '-')}`;
+        
+        const headerElements = table.querySelectorAll(`th.${headerClass}`);
+        const cellElements = table.querySelectorAll(`td.${cellClass}`);
+        
+        const isVisible = visibleColumns.includes(column);
+        
+        headerElements.forEach(el => {
+            el.style.display = isVisible ? '' : 'none';
+        });
+        
+        cellElements.forEach(el => {
+            el.style.display = isVisible ? '' : 'none';
+        });
+    });
+}
+
+// Text size control functions
+function initTextSizeSlider() {
+    const slider = document.getElementById('textSizeSlider');
+    const valueDisplay = document.getElementById('textSizeValue');
+    
+    if (!slider || !valueDisplay) return;
+    
+    slider.addEventListener('input', function() {
+        valueDisplay.textContent = this.value + 'px';
+    });
+}
+
 function generateAnnotatedPDF() {
     const editableCells = document.querySelectorAll('.editable-cell');
     const tableData = [];
@@ -419,6 +609,10 @@ function generateAnnotatedPDF() {
         tableData.push(rowData);
     });
     
+    // Get selected font size and font type
+    const textSize = document.getElementById('textSizeSlider').value;
+    const fontType = document.getElementById('fontSelector').value;
+    
     // Show PDF-specific loading animation
     showPDFLoading();
     
@@ -435,7 +629,9 @@ function generateAnnotatedPDF() {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            tableData: tableData
+            tableData: tableData,
+            fontSize: parseInt(textSize),
+            fontType: fontType
         })
     })
     .then(response => response.json())
@@ -661,6 +857,79 @@ tr[data-page-index="0"] td {
 .editable-cell {
     min-width: 80px;
     box-sizing: border-box;
+}
+
+/* Column visibility styles */
+.column-hidden {
+    display: none !important;
+}
+
+/* Text size slider styles */
+.form-range {
+    background: transparent;
+}
+
+.form-range::-webkit-slider-track {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 5px;
+    height: 4px;
+}
+
+.form-range::-webkit-slider-thumb {
+    background: #ffffff;
+    border: 2px solid #007bff;
+    border-radius: 50%;
+    height: 16px;
+    width: 16px;
+}
+
+.form-range::-moz-range-track {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 5px;
+    height: 4px;
+}
+
+.form-range::-moz-range-thumb {
+    background: #ffffff;
+    border: 2px solid #007bff;
+    border-radius: 50%;
+    height: 16px;
+    width: 16px;
+}
+
+/* Modal styles */
+.modal-header {
+    background: linear-gradient(135deg, #007bff, #0056b3);
+    color: white;
+}
+
+.modal-header .btn-close {
+    filter: invert(1);
+}
+
+/* Checkbox styling in modal */
+.form-check-input:checked {
+    background-color: #007bff;
+    border-color: #007bff;
+}
+
+/* Font selector styling */
+#fontSelector {
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    color: #333;
+    font-size: 0.8rem;
+}
+
+#fontSelector:focus {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+#fontSelector option {
+    background: white;
+    color: #333;
 }
 
 /* PDF Loading Animation Styles */
