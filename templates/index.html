@@ -30,11 +30,47 @@
 </div>
 
 <script>
-document.getElementById('upload-form').addEventListener('submit', function() {
+document.getElementById('upload-form').addEventListener('submit', function(e) {
     const button = this.querySelector('button[type="submit"]');
     const spinner = button.querySelector('.spinner-border');
+    const fileInput = document.getElementById('file-input');
+    
+    // Validate file selection
+    if (!fileInput.files.length) {
+        e.preventDefault();
+        alert('Please select a file to upload.');
+        return;
+    }
+    
+    // Show loading overlay
+    LoadingManager.show();
+    
+    // Simulate progress updates
+    setTimeout(() => LoadingManager.updateProgress(10, 'Uploading file...'), 500);
+    setTimeout(() => LoadingManager.updateProgress(25, 'Extracting text from document...'), 2000);
+    setTimeout(() => LoadingManager.updateProgress(50, 'Processing with AI...'), 8000);
+    setTimeout(() => LoadingManager.updateProgress(75, 'Searching CRM database...'), 15000);
+    setTimeout(() => LoadingManager.updateProgress(90, 'Generating results...'), 25000);
+    
+    // Update button state
     button.disabled = true;
     spinner.classList.remove('d-none');
+    button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...';
+});
+
+// Handle file input change to show file info
+document.getElementById('file-input').addEventListener('change', function() {
+    const file = this.files[0];
+    if (file) {
+        const fileSize = (file.size / 1024 / 1024).toFixed(2);
+        const fileType = file.type;
+        console.log(`Selected file: ${file.name} (${fileSize} MB, ${fileType})`);
+        
+        // You could add a file preview here if needed
+        if (fileSize > 50) {
+            alert('Warning: Large files may take longer to process.');
+        }
+    }
 });
 </script>
 {% endblock %} 

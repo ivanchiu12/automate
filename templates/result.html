@@ -74,7 +74,11 @@
         </div>
         <div class="card-body p-0">
             {% if all_crm_rows %}
-                <div class="table-responsive">
+                <div class="mb-2 text-muted small px-3 py-2">
+                    <i class="bi bi-info-circle"></i> 
+                    Scroll horizontally to view all columns. Drag column borders to resize.
+                </div>
+                <div class="table-responsive" style="max-height: 80vh; overflow-x: auto; overflow-y: auto;">
                     <table class="table table-bordered table-sm table-hover mb-0" id="crmTable">
                         <thead class="table-dark">
                             <tr>
@@ -420,11 +424,20 @@ function generateAnnotatedPDF() {
         tableData.push(rowData);
     });
     
-    // Show loading state
+    // Show loading overlay for PDF generation
+    LoadingManager.show();
+    LoadingManager.updateProgress(10, 'Preparing data...');
+    
+    // Show loading state on button too
     const button = event.target;
     const originalText = button.innerHTML;
     button.innerHTML = '<i class="bi bi-hourglass-split"></i> Generating PDF...';
     button.disabled = true;
+    
+    // Simulate progress for PDF generation
+    setTimeout(() => LoadingManager.updateProgress(30, 'Processing table data...'), 500);
+    setTimeout(() => LoadingManager.updateProgress(60, 'Creating PDF annotations...'), 1000);
+    setTimeout(() => LoadingManager.updateProgress(80, 'Finalizing PDF...'), 1500);
     
     // Send data to backend
     fetch('/generate_annotated_pdf', {
@@ -438,23 +451,29 @@ function generateAnnotatedPDF() {
     })
     .then(response => response.json())
     .then(data => {
-        button.innerHTML = originalText;
-        button.disabled = false;
+        LoadingManager.updateProgress(100, 'PDF generated successfully!');
         
-        if (data.success) {
-            // Create download link
-            const link = document.createElement('a');
-            link.href = '/download/' + data.filename;
-            link.download = data.filename;
-            link.click();
+        setTimeout(() => {
+            LoadingManager.hide();
+            button.innerHTML = originalText;
+            button.disabled = false;
             
-            // Show success message
-            alert('Annotated PDF generated successfully!');
-        } else {
-            alert('Error generating PDF: ' + (data.error || 'Unknown error'));
-        }
+            if (data.success) {
+                // Create download link
+                const link = document.createElement('a');
+                link.href = '/download/' + data.filename;
+                link.download = data.filename;
+                link.click();
+                
+                // Show success message
+                alert('Annotated PDF generated successfully!');
+            } else {
+                alert('Error generating PDF: ' + (data.error || 'Unknown error'));
+            }
+        }, 1000);
     })
     .catch(error => {
+        LoadingManager.hide();
         button.innerHTML = originalText;
         button.disabled = false;
         console.error('Error:', error);
@@ -541,7 +560,8 @@ tr[data-page-index="0"] td {
 /* Ensure table layout is fixed for proper resizing */
 #crmTable {
     table-layout: fixed;
-    width: 100%;
+    width: max-content; /* Allow table to expand beyond container */
+    min-width: 1800px; /* Minimum width to ensure all columns are visible */
 }
 
 #crmTable th,
@@ -549,6 +569,47 @@ tr[data-page-index="0"] td {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    position: relative;
+}
+
+/* Improve table container scrolling */
+.table-responsive {
+    border: 1px solid #dee2e6;
+    border-radius: 0.375rem;
+}
+
+/* Sticky header for better UX during vertical scroll */
+#crmTable thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: #343a40 !important;
+}
+
+/* Improve scrollbar appearance */
+.table-responsive::-webkit-scrollbar {
+    height: 12px;
+    width: 12px;
+}
+
+.table-responsive::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 10px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Ensure inputs don't break table layout */
+.editable-cell {
+    min-width: 80px;
+    box-sizing: border-box;
 }
 </style>
 {% endblock %} 

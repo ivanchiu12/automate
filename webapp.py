@@ -246,7 +246,13 @@ def find_blank_space_on_page(doc, page_num):
 def create_annotated_pdf(original_pdf_path, parsed_info_list, all_crm_rows, output_path, invoice_to_page_mapping=None):
     """Create an annotated PDF with CRM results overlaid on the original pages"""
     try:
+        print(f"📖 Opening original PDF: {original_pdf_path}")
+        if not os.path.exists(original_pdf_path):
+            print(f"❌ Original PDF file does not exist: {original_pdf_path}")
+            return False
+            
         doc = fitz.open(original_pdf_path)
+        print(f"✅ Successfully opened PDF with {len(doc)} pages")
         
         # Group CRM results by their page index
         crm_by_page = {}
@@ -367,11 +373,41 @@ def create_annotated_pdf(original_pdf_path, parsed_info_list, all_crm_rows, outp
             else:
                 print(f"ℹ️ No CRM results for page {page_num + 1}")
         
-        # Save the annotated PDF
-        doc.save(output_path)
-        doc.close()
-        print(f"✅ Annotated PDF saved to: {output_path}")
-        return True
+        # Save the annotated PDF with error handling
+        try:
+            print(f"💾 Saving annotated PDF to: {output_path}")
+            doc.save(output_path, garbage=4, deflate=True)  # Add compression and cleanup
+            doc.close()
+            
+            # Verify the saved file
+            if os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                print(f"✅ Annotated PDF saved successfully:")
+                print(f"   Path: {output_path}")
+                print(f"   Size: {file_size} bytes")
+                
+                # Quick PDF validation
+                try:
+                    with open(output_path, 'rb') as f:
+                        header = f.read(4)
+                        if header == b'%PDF':
+                            print("✅ PDF file validation passed")
+                            return True
+                        else:
+                            print(f"❌ Invalid PDF header: {header}")
+                            return False
+                except Exception as e:
+                    print(f"❌ Error validating PDF: {e}")
+                    return False
+            else:
+                print(f"❌ PDF file was not created at: {output_path}")
+                return False
+                
+        except Exception as save_error:
+            print(f"❌ Error saving PDF: {save_error}")
+            if doc:
+                doc.close()
+            return False
         
     except Exception as e:
         print(f"❌ Error creating annotated PDF: {e}")
@@ -384,7 +420,8 @@ def parse_bank_info(text):
     if not api_key:
         print("❌ XAI_API_KEY not found in .env")
         return []
-    
+
+    print(f"✅ Grok API key loaded successfully")
     client = OpenAI(
         api_key=api_key,
         base_url="https://api.x.ai/v1",
@@ -436,14 +473,23 @@ def parse_bank_info(text):
                 """
     
     try:
+        print(f"🚀 Making API call to Grok (xAI) API...")
+        print(f"   🤖 Model: grok-code-fast-1")
+        print(f"   📝 Prompt length: {len(prompt)} characters")
+        print(f"   🌐 Endpoint: https://api.x.ai/v1/chat/completions")
+        print(f"   ⏰ Starting request at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
         response = client.chat.completions.create(
-            model="grok-4-0709",
+            model="grok-code-fast-1",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that extracts structured data from text."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
         )
+
+        print(f"✅ Grok API request completed successfully!")
+        print(f"   📊 Response received at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         extracted_json = response.choices[0].message.content.strip()
         
         # Print Grok results to terminal
@@ -564,7 +610,10 @@ def extract_invoice(file_path: str) -> tuple[list[str], list[dict], list[dict]]:
         if not extracted_text:
             print(f"❌ Failed to extract text from PDF: {file_path}")
             return [], [], []
-        
+
+        print(f"🚀 Sending PDF extracted text to Grok API for parsing...")
+        print(f"   📊 Text length: {len(extracted_text)} characters")
+        print(f"   📄 Processing PDF: {file_path}")
         parsed_info_list = parse_bank_info(extracted_text)
     else:
         print(f"🖼️ Processing image file: {file_path}")
@@ -575,6 +624,10 @@ def extract_invoice(file_path: str) -> tuple[list[str], list[dict], list[dict]]:
 
         preprocessed = preprocess_image(image)
         extracted_text = extract_text_with_api(preprocessed)
+
+        print(f"🚀 Sending image extracted text to Grok API for parsing...")
+        print(f"   📊 Text length: {len(extracted_text)} characters")
+        print(f"   🖼️ Processing image: {file_path}")
         parsed_info_list = parse_bank_info(extracted_text)
     
     # Process each page's invoices and create mapping
@@ -1285,13 +1338,37 @@ def download_annotated_pdf(filename):
     """Serve the annotated PDF for download"""
     try:
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        if os.path.exists(file_path) and filename.startswith('annotated_'):
-            return send_file(file_path, as_attachment=True, 
-                           download_name=f"results_{filename.split('_', 2)[-1]}")
+        print(f"🔍 Download request for: {filename}")
+        print(f"📁 Full path: {file_path}")
+        print(f"📄 File exists: {os.path.exists(file_path)}")
+        
+        if os.path.exists(file_path) and ('annotated_' in filename or 'updated_annotated_' in filename):
+            # Extract the original filename for download
+            if filename.startswith('updated_annotated_'):
+                # For updated PDFs: updated_annotated_{uuid}_{original_filename}
+                parts = filename.split('_', 3)
+                if len(parts) >= 4:
+                    download_name = f"updated_results_{parts[3]}"
+                else:
+                    download_name = f"updated_results_{filename}"
+            elif filename.startswith('annotated_'):
+                # For original annotated PDFs: annotated_{uuid}_{original_filename}
+                parts = filename.split('_', 2)
+                if len(parts) >= 3:
+                    download_name = f"results_{parts[2]}"
+                else:
+                    download_name = f"results_{filename}"
+            else:
+                download_name = filename
+            
+            print(f"✅ Serving file with download name: {download_name}")
+            return send_file(file_path, as_attachment=True, download_name=download_name)
         else:
+            print(f"❌ File not found or invalid filename: {filename}")
             flash('File not found or invalid filename.', 'danger')
             return redirect(url_for('index'))
     except Exception as e:
+        print(f"❌ Error downloading file: {e}")
         flash(f'Error downloading file: {str(e)}', 'danger')
         return redirect(url_for('index'))
 
@@ -1318,8 +1395,14 @@ def generate_annotated_pdf():
         original_pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], pdf_files[0])
         
         # Create filename for the new annotated PDF
-        annotated_filename = f"updated_annotated_{uuid.uuid4().hex}_{pdf_files[0]}"
+        base_filename = os.path.splitext(pdf_files[0])[0]  # Remove extension
+        annotated_filename = f"updated_annotated_{uuid.uuid4().hex}_{base_filename}.pdf"
         annotated_pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], annotated_filename)
+        
+        print(f"📝 Creating updated annotated PDF:")
+        print(f"   Original PDF: {pdf_files[0]}")
+        print(f"   New filename: {annotated_filename}")
+        print(f"   Output path: {annotated_pdf_path}")
         
         # Group table data by page index
         crm_by_page = {}
@@ -1351,6 +1434,7 @@ def generate_annotated_pdf():
             })
         
         # Generate the annotated PDF
+        print(f"🚀 Calling create_annotated_pdf function...")
         success = create_annotated_pdf(
             original_pdf_path, 
             parsed_info_list, 
@@ -1359,14 +1443,38 @@ def generate_annotated_pdf():
             invoice_to_page_mapping
         )
         
-        if success:
+        # Verify the file was created and is valid
+        if success and os.path.exists(annotated_pdf_path):
+            file_size = os.path.getsize(annotated_pdf_path)
+            print(f"✅ PDF created successfully:")
+            print(f"   File path: {annotated_pdf_path}")
+            print(f"   File size: {file_size} bytes")
+            
+            # Basic PDF validation - check if it starts with PDF header
+            try:
+                with open(annotated_pdf_path, 'rb') as f:
+                    header = f.read(4)
+                    if header == b'%PDF':
+                        print("✅ PDF header validation passed")
+                    else:
+                        print(f"⚠️ PDF header validation failed: {header}")
+            except Exception as e:
+                print(f"⚠️ PDF validation error: {e}")
+            
             return jsonify({
                 'success': True, 
                 'filename': annotated_filename,
                 'message': 'Annotated PDF generated successfully with your edits!'
             })
         else:
-            return jsonify({'success': False, 'error': 'Failed to generate annotated PDF'}), 500
+            error_msg = 'Failed to generate annotated PDF'
+            if not success:
+                error_msg += ' - PDF creation function returned False'
+            if not os.path.exists(annotated_pdf_path):
+                error_msg += f' - Output file does not exist: {annotated_pdf_path}'
+            
+            print(f"❌ {error_msg}")
+            return jsonify({'success': False, 'error': error_msg}), 500
             
     except Exception as e:
         print(f"❌ Error in generate_annotated_pdf route: {e}")
